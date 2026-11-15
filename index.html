@@ -1,0 +1,1370 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Rust Dungeon</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Press+Start+2P&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one centered phone-width column. Home is a sticky header, a quest card, then a vertical path of unit bands with level rows. A lesson is a fight: HP bar, arena, question, bottom dock. */
+:root{
+  color-scheme:dark;
+  --bg:#14172a; --panel:#1f2440; --panel2:#2a3052; --line:#373e69;
+  --text:#eceeff; --dim:#a4abd1;
+  --accent:#ffb020; --accent-ink:#2a1a00; --accent-edge:#b57400;
+  --good:#5fd99a; --good-bg:#163a2e; --good-edge:#2d9a64;
+  --bad:#ff6b7a; --bad-bg:#43202f; --bad-edge:#b83a4a;
+  --info:#7fb0ff; --sel-bg:#243061;
+  --code-bg:#0e1122;
+  --c-kw:#ff8fb1; --c-str:#9be58f; --c-com:#7f88b8; --c-num:#ffc66d; --c-mac:#7fd7ff; --c-ty:#c6a8ff;
+  --font-ui:'Nunito',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-pixel:'Press Start 2P',ui-monospace,Menlo,monospace;
+  --font-code:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--text);font:16px/1.5 var(--font-ui);
+  padding-block:0;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  background-image:radial-gradient(ellipse 90% 320px at 50% 0,rgba(255,176,32,.09),transparent 70%);
+  background-repeat:no-repeat;
+}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:40;background:var(--bg)}
+button{font-family:inherit}
+:focus-visible{outline:3px solid var(--info);outline-offset:2px}
+[hidden]{display:none!important}
+.app{max-width:520px;margin:0 auto;padding-bottom:32px}
+.spr{display:block;image-rendering:pixelated;height:auto}
+
+/* header */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:2px solid var(--line)}
+.logo{display:flex;align-items:center;gap:10px;min-width:0}
+.logo .spr{width:30px;flex:none}
+.logo b{font:400 10px/1.5 var(--font-pixel);letter-spacing:.04em;text-transform:uppercase}
+.stats{display:flex;gap:6px;flex:none}
+.chip{display:flex;align-items:center;gap:6px;padding:5px 10px;background:var(--panel);border:2px solid var(--line);border-radius:999px;font-weight:800;font-size:14px;font-variant-numeric:tabular-nums}
+.chip .spr{width:14px}
+
+/* quest card */
+.quest{margin-top:18px;padding:18px;background:var(--panel);border:2px solid var(--line);border-radius:16px;display:grid;gap:12px}
+.rank{font:400 11px/1.4 var(--font-pixel);color:var(--accent);text-transform:uppercase}
+.quest h1{margin:0;font-size:22px;line-height:1.2;font-weight:800;text-wrap:balance}
+.quest p{margin:0;color:var(--dim)}
+.xpbar{height:10px;border-radius:5px;background:var(--panel2);overflow:hidden}
+.xpbar i{display:block;height:100%;background:var(--accent);border-radius:5px}
+.xpnote{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--dim);font-variant-numeric:tabular-nums}
+.links{display:flex;flex-wrap:wrap;gap:8px 16px}
+.links a{color:var(--info);font-weight:700}
+
+/* buttons */
+.btn{display:block;width:100%;padding:14px 16px;border:0;border-radius:14px;font-weight:800;font-size:15px;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;color:var(--accent-ink);background:var(--accent);box-shadow:0 4px 0 var(--accent-edge)}
+.btn:active:not(:disabled){transform:translateY(3px);box-shadow:0 1px 0 var(--accent-edge)}
+.btn:disabled{background:var(--panel2);color:var(--dim);box-shadow:0 4px 0 #20264a;cursor:not-allowed}
+.btn.good{background:var(--good);box-shadow:0 4px 0 var(--good-edge);color:#04281a}
+.btn.bad{background:var(--bad);box-shadow:0 4px 0 var(--bad-edge);color:#3a0510}
+.btn.ghost{background:transparent;color:var(--text);border:2px solid var(--line);box-shadow:none}
+
+/* units + levels */
+.path{display:grid;gap:26px;margin-top:26px}
+.unit{display:grid;gap:10px}
+.uhead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-radius:16px;background:var(--u);color:#14172a}
+.uhead .eb{font:400 9px/1.4 var(--font-pixel);text-transform:uppercase;opacity:.75;margin:0 0 6px}
+.uhead h2{margin:0;font-size:20px;line-height:1.15;font-weight:800;text-wrap:balance}
+.uhead p{margin:4px 0 0;font-size:14px;font-weight:600;opacity:.8}
+.uhead .spr{width:54px;flex:none}
+.uhead .cleared{font:400 8px/1.4 var(--font-pixel);text-transform:uppercase;background:#14172a;color:var(--u);padding:4px 6px;border-radius:6px;display:inline-block;margin-top:8px}
+.lvl{display:flex;align-items:center;gap:14px;width:100%;text-align:left;padding:12px 14px;background:var(--panel);border:2px solid var(--line);border-bottom-width:4px;border-radius:16px;color:var(--text);cursor:pointer;min-width:0}
+.lvl .node{flex:none;width:50px;height:50px;border-radius:50%;display:grid;place-items:center;background:var(--panel2);color:var(--dim);border:3px solid var(--line)}
+.lvl .node svg{width:22px;height:22px}
+.lvl .txt{min-width:0;flex:1}
+.lvl b{display:block;font-size:16px;font-weight:800;line-height:1.25}
+.lvl small{display:block;color:var(--dim);font-size:13px;font-weight:600}
+.lvl .go{flex:none;font:400 9px/1 var(--font-pixel);padding:7px 8px;border-radius:8px;background:var(--accent);color:var(--accent-ink);text-transform:uppercase}
+.lvl.cur{border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,176,32,.18)}
+.lvl.cur .node{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.lvl.done .node{background:var(--u);border-color:var(--u);color:#14172a}
+.lvl.lock{opacity:.5;cursor:not-allowed}
+.lvl:nth-of-type(even){margin-left:18px;width:calc(100% - 18px)}
+.sec{display:grid;gap:26px}
+.sechead{display:grid;gap:8px;padding-top:20px;border-top:2px dashed var(--line)}
+.sechead .eb{font:400 10px/1.4 var(--font-pixel);color:var(--accent);text-transform:uppercase;margin:0}
+.sechead h2{margin:0;font-size:26px;line-height:1.15;font-weight:800;text-wrap:balance}
+.sechead p{margin:0;color:var(--dim)}
+.secbar{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;color:var(--dim);font-variant-numeric:tabular-nums}
+.secbar .xpbar{flex:1}
+.lvl.boss{border-style:dashed}
+.lvl.boss .node{background:var(--bad-bg);border-color:var(--bad);color:var(--bad)}
+.lvl.boss.cur .node{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.lvl.boss.done .node{background:var(--good);border-color:var(--good);color:#04281a}
+.lvl .node .bs{width:30px;height:auto}
+.foot{margin-top:34px;padding-top:18px;border-top:2px solid var(--line);display:grid;gap:12px;color:var(--dim);font-size:14px}
+.foot a{color:var(--info);font-weight:700}
+.reset{background:none;border:2px solid var(--line);color:var(--dim);border-radius:10px;padding:8px 12px;font-weight:700;cursor:pointer}
+.reset[data-armed]{border-color:var(--bad);color:var(--bad)}
+.resets{display:flex;flex-wrap:wrap;gap:10px}
+
+/* lesson */
+.lbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--bg);display:flex;align-items:center;gap:12px;padding:12px 0}
+.xbtn{flex:none;width:36px;height:36px;border-radius:10px;border:0;background:transparent;color:var(--dim);cursor:pointer;display:grid;place-items:center}
+.xbtn svg{width:22px;height:22px}
+.hpbar{flex:1;height:16px;border-radius:8px;background:var(--panel2);overflow:hidden;border:2px solid var(--line)}
+.hpbar i{display:block;height:100%;background:var(--bad);transition:width .45s ease}
+.hearts{display:flex;gap:4px;flex:none}
+.hearts .spr{width:22px}
+.arena{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;padding:10px 8px 0;border-bottom:4px solid var(--line);margin-bottom:18px}
+.fighter{display:grid;justify-items:center;gap:4px;padding-bottom:6px}
+.fighter .spr{width:56px}
+.fighter.foe .spr{width:64px}
+.fighter small{font:400 8px/1.4 var(--font-pixel);color:var(--dim);text-transform:uppercase}
+@keyframes lungeR{0%{transform:translateX(0)}40%{transform:translateX(70px)}100%{transform:translateX(0)}}
+@keyframes lungeL{0%{transform:translateX(0)}40%{transform:translateX(-70px)}100%{transform:translateX(0)}}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+.arena.good .hero{animation:lungeR .5s ease}
+.arena.good .foe{animation:shake .4s .2s}
+.arena.bad .foe{animation:lungeL .5s ease}
+.arena.bad .hero{animation:shake .4s .2s}
+.qtype{margin:0 0 6px;font:400 9px/1.4 var(--font-pixel);color:var(--info);text-transform:uppercase}
+.prompt{margin:0 0 14px;font-size:20px;line-height:1.3;font-weight:800;text-wrap:balance}
+code.ic{font:600 .86em var(--font-code);background:var(--code-bg);border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:var(--c-mac);white-space:nowrap}
+.code{margin:0 0 14px;padding:12px 14px;background:var(--code-bg);border:2px solid var(--line);border-radius:12px;font:400 13.5px/1.6 var(--font-code);overflow-x:auto;white-space:pre;tab-size:4}
+.code .k{color:var(--c-kw)}.code .s{color:var(--c-str)}.code .c{color:var(--c-com);font-style:italic}.code .n{color:var(--c-num)}.code .m{color:var(--c-mac)}.code .t{color:var(--c-ty)}
+.blank{display:inline-block;min-width:3.2ch;padding:0 6px;border-bottom:3px solid var(--accent);background:rgba(255,176,32,.14);border-radius:4px;color:var(--accent);font-weight:600;vertical-align:baseline;white-space:pre}
+.blank:empty::after{content:"\00a0\00a0\00a0"}
+.opt{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:13px 14px;margin-bottom:10px;background:var(--panel);border:2px solid var(--line);border-bottom-width:4px;border-radius:14px;color:var(--text);font-weight:700;font-size:16px;line-height:1.3;cursor:pointer;min-width:0}
+.opt .kc{flex:none;width:26px;height:26px;border-radius:8px;border:2px solid var(--line);display:grid;place-items:center;font:400 10px/1 var(--font-pixel);color:var(--dim)}
+.opt .t{min-width:0;overflow-wrap:anywhere}
+.opt.mono .t{font:600 14px/1.4 var(--font-code)}
+.opt.sel{border-color:var(--info);background:var(--sel-bg)}
+.opt.sel .kc{border-color:var(--info);color:var(--info)}
+.opt.good{border-color:var(--good);background:var(--good-bg)}
+.opt.bad{border-color:var(--bad);background:var(--bad-bg)}
+.line{min-height:58px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 0;border-top:2px solid var(--line);border-bottom:2px solid var(--line);margin-bottom:16px}
+.line:empty::before{content:"Tap the pieces below, in order";color:var(--dim);font-size:14px}
+.bank{display:flex;flex-wrap:wrap;gap:8px}
+.tok{padding:10px 12px;border-radius:10px;border:2px solid var(--line);border-bottom-width:4px;background:var(--panel);color:var(--text);font:600 14px/1.2 var(--font-code);cursor:pointer;max-width:100%;overflow-wrap:anywhere}
+.tok.used{visibility:hidden}
+.typein{width:100%;padding:14px;border-radius:12px;border:2px solid var(--line);background:var(--code-bg);color:var(--text);font:600 18px var(--font-code)}
+.typein:focus{border-color:var(--info);outline:none}
+.typein.good{border-color:var(--good)}.typein.bad{border-color:var(--bad)}
+.dock{position:sticky;bottom:0;background:var(--bg);margin-top:18px;padding:12px 0 calc(12px + env(safe-area-inset-bottom,0px));display:grid;gap:10px}
+.fb{display:grid;gap:10px;padding:14px;border-radius:14px;border:2px solid}
+.fb.good{background:var(--good-bg);border-color:var(--good)}
+.fb.bad{background:var(--bad-bg);border-color:var(--bad)}
+.fb strong{font-size:18px;font-weight:800}
+.fb.good strong{color:var(--good)}.fb.bad strong{color:var(--bad)}
+.fb p{margin:0;font-size:15px}
+.fb .ans{font-family:var(--font-code);font-weight:600;font-size:14px;overflow-wrap:anywhere}
+.learn h1{margin:0 0 12px;font-size:26px;line-height:1.15;font-weight:800;text-wrap:balance}
+.learn .hero-foe{display:flex;align-items:center;gap:14px;margin:6px 0 16px}
+.learn .hero-foe .spr{width:72px}
+.learn p{margin:0 0 12px;max-width:65ch}
+.end{display:grid;justify-items:center;text-align:center;gap:10px;padding-top:30px}
+.end .spr{width:96px}
+.end .spr.dead{filter:grayscale(1) brightness(.7);transform:rotate(90deg);margin:20px 0}
+.end h1{margin:0;font-size:28px;line-height:1.15;font-weight:800;text-wrap:balance}
+.end p{margin:0;color:var(--dim)}
+.sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;margin:14px 0}
+.sgrid div{padding:12px 6px;background:var(--panel);border:2px solid var(--line);border-radius:14px}
+.sgrid b{display:block;font:400 15px/1.2 var(--font-pixel);color:var(--accent);margin-bottom:6px;font-variant-numeric:tabular-nums}
+.sgrid span{font-size:12px;color:var(--dim);font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.modal{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));background:rgba(8,10,20,.78)}
+.modal .box{width:100%;max-width:380px;background:var(--panel);border:2px solid var(--line);border-radius:16px;padding:20px;display:grid;gap:12px}
+.modal h2{margin:0;font-size:20px}.modal p{margin:0;color:var(--dim)}
+.say{flex:none;width:38px;height:38px;border-radius:50%;border:2px solid var(--line);background:var(--panel);color:var(--info);display:grid;place-items:center;cursor:pointer;padding:0}
+.say svg{width:20px;height:20px}
+.say.on{background:var(--info);color:#0b1230;border-color:var(--info)}
+.qhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.qhead .qtype{margin:0}
+.lbar .say{margin-left:auto}
+.fbhead{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.fb .say{width:34px;height:34px}
+details.voice{margin-top:14px;background:var(--panel);border:2px solid var(--line);border-radius:16px}
+details.voice summary{list-style:none;display:flex;align-items:center;gap:10px;padding:12px 14px;font-weight:800;cursor:pointer}
+details.voice summary::-webkit-details-marker{display:none}
+details.voice summary svg{width:20px;height:20px;color:var(--info)}
+details.voice summary::after{content:"";margin-left:auto;width:8px;height:8px;border-right:3px solid var(--dim);border-bottom:3px solid var(--dim);transform:rotate(45deg);transition:transform .2s}
+details.voice[open] summary::after{transform:rotate(-135deg)}
+.vbody{display:grid;gap:14px;padding:0 14px 16px}
+.vbody label{display:grid;gap:6px;font-size:13px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+.vbody label.vrow{display:flex;align-items:center;gap:10px;text-transform:none;letter-spacing:0;font-size:15px;color:var(--text)}
+.vbody select{width:100%;min-width:0;padding:11px 12px;border-radius:10px;border:2px solid var(--line);background:var(--code-bg);color:var(--text);font:600 15px var(--font-ui)}
+.vbody input[type=range]{width:100%;accent-color:var(--accent)}
+.vbody input[type=checkbox]{width:22px;height:22px;flex:none;accent-color:var(--accent)}
+.vbody .btn{width:auto;justify-self:start;padding:10px 16px}
+.vnote{margin:0;color:var(--dim);font-size:14px}
+button.chip{font-family:inherit;color:var(--text);cursor:pointer}
+.logo .spr.hsp{width:44px}
+.fighter.hero .spr.hsp{width:104px}
+.end .spr.hsp{width:140px}
+.end .spr.hsp.dead{margin:34px 0}
+.sgrid{grid-template-columns:repeat(4,1fr);gap:8px}
+.sgrid b{font-size:13px}
+.sgrid span{font-size:11px;letter-spacing:.03em}
+.herocard{display:flex;align-items:center;gap:14px;margin-top:14px;padding:12px 14px;background:var(--panel);border:2px solid var(--line);border-radius:16px}
+.herocard .hsp{width:96px;flex:none}
+.herocard div{flex:1;min-width:0;display:grid}
+.herocard b{font-size:16px}
+.herocard span{color:var(--dim);font-size:14px}
+.btn.small{width:auto;flex:none;padding:10px 14px;font-size:13px}
+.shoptitle{font:400 11px/1.4 var(--font-pixel);text-transform:uppercase}
+.stage{margin-top:14px;display:grid;justify-items:center;padding-top:18px;background:var(--panel);border:2px solid var(--line);border-radius:16px;overflow:hidden}
+.stage .spr.hsp{width:min(260px,76%)}
+.stage .floor{width:100%;height:16px;background:var(--panel2);border-top:3px solid var(--line)}
+.shopmsg{margin:12px 0 0;min-height:22px;color:var(--dim);font-size:14px}
+.tabs{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 12px}
+.tab{padding:8px 14px;border-radius:999px;border:2px solid var(--line);background:var(--panel);color:var(--dim);font-weight:800;font-size:14px;cursor:pointer}
+.tab[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.item{display:grid;gap:8px;align-content:start;justify-items:center;text-align:center;padding:10px;background:var(--panel);border:2px solid var(--line);border-radius:14px;min-width:0}
+.item.eq{border-color:var(--good);background:var(--good-bg)}
+.item .spr.hsp{width:100%;max-width:150px}
+.item b{font-size:15px;line-height:1.2}
+.item .price{display:flex;align-items:center;gap:6px;font-weight:800;font-size:14px;font-variant-numeric:tabular-nums;color:var(--dim)}
+.item .price .spr{width:14px}
+.item .btn{padding:9px 10px;font-size:12px;letter-spacing:.03em}
+.fdots{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+.fdot{width:38px;height:38px;border-radius:50%;border:2px solid var(--line);background:var(--panel);color:var(--dim);font:800 14px var(--font-ui);display:grid;place-items:center;cursor:pointer;padding:0}
+.fdot svg{width:16px;height:16px}
+.fdot .spr{width:16px}
+.fdot.cur{border-color:var(--accent);color:var(--accent)}
+.fdot.done{background:var(--good);border-color:var(--good);color:#04281a}
+.fq h1{margin:12px 0;font-size:26px;line-height:1.15;font-weight:800;text-wrap:balance}
+.fq p{margin:0 0 12px;max-width:65ch}
+.fq ol,.fq ul{margin:0 0 14px;padding-left:22px;display:grid;gap:8px}
+.fq a{color:var(--info);font-weight:700}
+.fq a.btn{color:var(--accent-ink)}
+.fq a.btn.ghost{color:var(--text)}
+.lab{margin:16px 0 8px;font:400 9px/1.4 var(--font-pixel);text-transform:uppercase;color:var(--dim)}
+.code .ln{display:block}
+.code .ln:empty{min-height:1.6em}
+.code .ln.add{background:rgba(95,217,154,.16);margin:0 -14px;padding:0 14px;box-shadow:inset 3px 0 0 var(--good)}
+.code.out{border-color:var(--good);margin:0}
+.btnrow{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 10px}
+a.btn{text-decoration:none;text-align:center}
+.fmsg{min-height:22px;margin:0 0 10px;color:var(--dim);font-size:14px}
+.predict{margin:6px 0 16px;padding:14px;background:var(--panel);border:2px solid var(--line);border-radius:16px}
+.predict .prompt{font-size:18px;margin:0 0 12px}
+.predict .opt{margin-bottom:8px;background:var(--bg)}
+.predict .opt.good{background:var(--good-bg)}
+.predict .opt.bad{background:var(--bad-bg)}
+.fq .pfb{margin:4px 0 0;min-height:22px;font-size:15px}
+.fcast{display:flex;align-items:flex-end;justify-content:center;gap:24px;margin:14px 0 0}
+.fcast .spr.hsp{width:128px}
+.fcast .spr:not(.hsp){width:96px}
+.tips{margin:0;padding-left:20px;display:grid;gap:6px;color:var(--dim);font-size:14px}
+.redeem{margin-top:14px;display:grid;grid-template-columns:minmax(0,1fr);gap:8px;padding:12px 14px;background:var(--panel);border:2px solid var(--line);border-radius:16px}
+.redeem label{font:400 9px/1.4 var(--font-pixel);text-transform:uppercase;color:var(--dim)}
+.rrow{display:flex;gap:8px}
+.rrow .typein{flex:1;min-width:0;width:auto;padding:10px 12px;font-size:16px;text-transform:uppercase;letter-spacing:.06em}
+.rrow .btn.small{padding:10px 16px}
+.redeem .vnote{margin:0}
+.codebox{display:grid;gap:6px;justify-items:center;text-align:center;width:100%;padding:12px;margin:0 0 14px;background:var(--panel);border:2px dashed var(--accent);border-radius:14px}
+.codebox span{font:400 9px/1.4 var(--font-pixel);text-transform:uppercase;color:var(--dim)}
+.codebox b{font:400 16px/1.4 var(--font-pixel);color:var(--accent);letter-spacing:.06em;overflow-wrap:anywhere}
+.codebox small{color:var(--dim);font-size:13px}
+.herocard .hbtns{display:flex;flex:none;flex-wrap:wrap;gap:8px;margin-top:8px}
+@media (max-width:440px){.logo b{display:none}}
+@media (max-width:380px){.logo b{font-size:8px}.chip{padding:5px 8px}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="app" id="app">
+  <div id="home"></div>
+  <div id="lesson" hidden></div>
+  <div id="shop" hidden></div>
+  <div id="final" hidden></div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+/* ---------- helpers ---------- */
+var $=function(s){return document.querySelector(s)};
+var esc=function(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')};
+var md=function(s){return esc(s).replace(/`([^`]+)`/g,'<code class="ic">$1</code>')};
+function shuffle(a){a=a.slice();for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t}return a}
+var RE=/(\/\/[^\n]*)|("(?:[^"\\]|\\.)*")|\b(fn|let|mut|if|else|match|loop|while|for|in|break|return|struct|impl|enum|self|true|false|const)\b|\b([A-Za-z_]\w*!)|\b(\d+(?:\.\d+)?)\b|\b(i32|f32|bool|String|Vec|Option|Some|None|Self|str|Enemy|Player|Fighter|Action)\b/g;
+function hl(src){
+  src=src.replace('___','');
+  var out='',last=0,m;RE.lastIndex=0;
+  while((m=RE.exec(src))){
+    out+=esc(src.slice(last,m.index));
+    var c=m[1]?'c':m[2]?'s':m[3]?'k':m[4]?'m':m[5]?'n':'t';
+    out+='<span class="'+c+'">'+esc(m[0])+'</span>';last=RE.lastIndex;
+  }
+  out+=esc(src.slice(last));
+  return out.replace(//g,'<span class="blank" id="blank"></span>');
+}
+
+/* ---------- pixel art ---------- */
+function sprite(map,pal,cls){
+  var h=map.length,w=map[0].length,r='';
+  map.forEach(function(row,y){var x=0;while(x<w){var c=row[x];if(c==='.'||!pal[c]){x++;continue}var e=x;while(e<w&&row[e]===c)e++;r+='<rect x="'+x+'" y="'+y+'" width="'+(e-x)+'" height="1" fill="'+pal[c]+'"/>';x=e}});
+  return '<svg class="spr '+(cls||'')+'" viewBox="0 0 '+w+' '+h+'" shape-rendering="crispEdges" aria-hidden="true">'+r+'</svg>';
+}
+var SPR={
+  slime:["........","..aaaa..",".aaaaaa.","aawaawaa","aakaakaa","aaaaaaaa","daaaaaad",".dddddd."],
+  bat:["k..kk..k","kk.kk.kk","kkkkkkkk","kkrkkrkk",".kkkkkk.","..k..k.."],
+  skull:["..wwww..",".wwwwww.","wwwwwwww","wkkwwkkw","wkkwwkkw","wwwkkwww",".wwwwww.",".w.ww.w."],
+  ghost:["..wwww..",".wwwwww.","wwkwwkww","wwkwwkww","wwwwwwww","wwwkkwww","wwwwwwww","w.ww.ww."],
+  golem:["..gggg..",".gggggg.",".grggrg.","gggggggg","gggddggg","gg.dd.gg","gg.dd.gg","dd....dd"],
+  knight:["...rr...","..ssss..","..sffs..","..sffs..",".bbbbbb.","fbbbbbbs",".bb..bb.",".kk..kk."],
+  heart:[".rr.rr.","rwrrrrr","rrrrrrr",".rrrrr.","..rrr..","...r..."],
+  flame:["...o...","..oo...","..ooo..",".oooyo.",".ooyyo.","ooyyyoo","ooyyyoo",".ooooo."],
+  gem:["..aaa..",".aaaaa.","aawaaaa","aaaaaaa",".aaaaa.","..aaa..","...a..."],
+  chest:["........",".bbbbbb.","bbbbbbbb","dwdwdwdw","bbbyybbb","bbbyybbb","bbbbbbbb","dddddddd"],
+  dragon:["r........r","rr.gggg.rr",".gggggggg.","gggyggyggg","gggggggggg",".ggwggwgg.","..gggggg..","...dddd..."],
+  coin:[".yyyy.","yyooyy","yoyyoy","yoyyoy","yyooyy",".yyyy."]
+};
+var P={
+  green:{a:'#5fd99a',d:'#2b9d6b',w:'#fff',k:'#0d1020'},
+  blue:{a:'#6aa8ff',d:'#3a6fd1',w:'#fff',k:'#0d1020'},
+  bat:{k:'#8d6bdc',r:'#ff5d6c'},
+  redbat:{k:'#e0566f',r:'#ffe27a'},
+  bone:{w:'#ece6d2',k:'#14172a'},
+  redskull:{w:'#ff8b97',k:'#2a0f18'},
+  ghost:{w:'#cfe3ff',k:'#14172a'},
+  mossghost:{w:'#b8f0a8',k:'#14291a'},
+  golem:{g:'#9aa3c7',d:'#5b6492',r:'#ff6b7a'},
+  knight:{r:'#ff6b7a',s:'#c9d2ff',f:'#ffd2a8',b:'#4b7bff',k:'#14172a'},
+  heart:{r:'#ff5d6c',w:'#ffd0d6'},
+  heartoff:{r:'#3a4170',w:'#4a5282'},
+  flame:{o:'#ff7a2f',y:'#ffd166'},
+  gem:{a:'#55d6e6',w:'#d6fbff'},
+  tealslime:{a:'#4fd1c5',d:'#2a8f86',w:'#fff',k:'#0d1020'},
+  embslime:{a:'#ffb347',d:'#c77a1e',w:'#fff',k:'#0d1020'},
+  pinkghost:{w:'#ffc2ec',k:'#2a1030'},
+  purpskull:{w:'#d9c2ff',k:'#1e1238'},
+  bluebat:{k:'#5aa0ff',r:'#ffe27a'},
+  wallgolem:{g:'#c9a46b',d:'#7a5a2e',r:'#ff6b7a'},
+  gatewarden:{g:'#7fb0ff',d:'#3a6fd1',r:'#ffd166'},
+  ironknight:{r:'#ffb020',s:'#8f98c0',f:'#d9b38c',b:'#c0394f',k:'#14172a'},
+  mimic:{b:'#b0703c',d:'#4a2a12',y:'#ffd166',w:'#ffffff'},
+  wraith:{w:'#d9b8ff',k:'#1e1238'},
+  dragon:{g:'#ff6b4a',r:'#ffd166',y:'#fff1a8',w:'#ffffff',d:'#8a2d1f'},
+  coin:{y:'#ffd166',o:'#c98a10'}
+};
+var S_=function(n,p,c){return sprite(SPR[n],P[p],c)};
+
+/* ---------- course content ---------- */
+function ch(q,opts,why,o){return Object.assign({t:'choice',q:q,opts:opts,why:why},o||{})}
+function od(q,ans,extra,why,join){return {t:'order',q:q,ans:ans,tokens:ans.concat(extra),why:why,join:join===undefined?' ':join}}
+function ty(q,accept,why,code){return {t:'type',q:q,accept:accept,why:why,code:code}}
+
+var UNITS=[
+{title:'Wake Up, Hero',sub:'Print your first lines of Rust',color:'#5fd99a',foe:{name:'Slime',s:'slime',p:'green'},levels:[
+ {title:'Your first line',learn:{
+   text:['Every Rust program starts at a function called `main`. The code between its curly braces runs from top to bottom.','`println!` prints a line of text. Text goes inside double quotes, and most lines end with a semicolon.','Later lessons leave out `fn main()` to keep examples short, but the code always lives inside one.'],
+   code:'fn main() {\n    println!("You wake up in a dungeon.");\n}'},
+  qs:[
+   ch('Which function does every Rust program start running from?',['main','start','run','begin'],'Rust always looks for `fn main()` as the starting point.',{m:1}),
+   ch('Which word prints text to the screen?',['println','echo','say','write_text'],'`println!` prints a line. The `!` marks it as a macro.',{code:'fn main() {\n    ___!("A slime appears!");\n}',m:1}),
+   od('Build the line that prints Hello, hero!',['println!(','"Hello, hero!"',')',';'],['echo(','}'],'Text sits inside quotes, inside the brackets, and the line ends with a semicolon.',''),
+   ch('What goes at the end of most Rust statements?',[';',':','.',','],'A semicolon ends a statement.',{m:1})
+  ]},
+ {title:'Notes and slots',learn:{
+   text:['Two slashes start a comment. The computer skips it, so you can leave notes for yourself.','Inside `println!`, the symbols `{}` are a slot. Rust fills it with the value that comes after the string.'],
+   code:'// This is a note to myself\nprintln!("Gold: {}", 25);'},
+  qs:[
+   ch('Which line is a comment?',['// check the door','# check the door','-- check the door','<!-- check the door -->'],'Rust comments start with two slashes.',{m:1}),
+   ch('What does this print?',['Gold: 25','Gold: {}','Gold: ','25'],'The `{}` slot is replaced by 25.',{code:'println!("Gold: {}", 25);',m:1}),
+   ty('Type the two symbols that start a one-line comment.',['//'],'Two forward slashes.'),
+   ch('One line in this code is missing something. What?',['The first println! needs a ; at the end','Nothing, it is fine','main needs a return','Bye must be in single quotes'],'Statements in the middle of a block need a semicolon.',{code:'fn main() {\n    println!("Hi")\n    println!("Bye");\n}'})
+  ]}
+]},
+{title:'Hero Stats',sub:'Store health, gold and speed in variables',color:'#b69bff',foe:{name:'Bat',s:'bat',p:'bat'},levels:[
+ {title:'Let it be',learn:{
+   text:['`let` creates a variable, a named box that holds a value.','By default a variable cannot change. Add `mut` (short for mutable) when you want to change it later.'],
+   code:'let hp = 100;\nlet mut gold = 0;\ngold = gold + 25;'},
+  qs:[
+   ch('Which keyword creates a variable?',['let','var','make','int'],'Rust uses `let`.',{m:1}),
+   ch('This code fails to compile. Why?',['hp is not mutable, it needs let mut','hp must be a string','= is not allowed','100 is too big'],'Variables are fixed unless you write `mut`.',{code:'let hp = 100;\nhp = 90;'}),
+   od('Make a changeable variable called gold that starts at 0.',['let','mut','gold','=','0',';'],['var','change'],'`let mut name = value;` makes a variable you can change.'),
+   ty('Type the missing keyword so score can change.',['mut'],'`mut` makes the variable mutable.','let ___ score = 0;\nscore = score + 10;')
+  ]},
+ {title:'Types of loot',learn:{
+   text:['Every value has a type. `i32` holds whole numbers, `f32` holds decimals, `bool` holds true or false, and `&str` holds text.','Game positions and speeds are usually `f32`, because a hero can stand at x = 3.75.'],
+   code:'let hp: i32 = 100;\nlet speed: f32 = 2.5;\nlet alive: bool = true;\nlet name: &str = "Mira";'},
+  qs:[
+   ch('Which type stores a whole number like 100?',['i32','f32','bool','&str'],'`i32` is a whole number.',{m:1}),
+   ch('Which type stores a position like 3.75?',['f32','i32','bool','&str'],'`f32` holds decimals.',{m:1}),
+   ch('Which value fits a bool?',['true','"true"','1.5','yes'],'A bool is exactly `true` or `false`, with no quotes.',{m:1}),
+   ch('Fill in the hero’s name.',['"Mira"','Mira',"'Mira'",'(Mira)'],'Text needs double quotes.',{code:'let name: &str = ___;',m:1})
+  ]}
+]},
+{title:'Fork in the Corridor',sub:'Make your code choose with if and match',color:'#e9e0c6',foe:{name:'Skeleton',s:'skull',p:'bone'},levels:[
+ {title:'If and else',learn:{
+   text:['`if` runs a block only when its condition is true. `else` runs when it is not.','Compare with `==` (equal), `!=` (not equal), `<`, `>`, `<=` and `>=`. A single `=` assigns a value, so it is not a comparison.'],
+   code:'let hp = 30;\nif hp < 50 {\n    println!("Low health!");\n} else {\n    println!("Feeling fine.");\n}'},
+  qs:[
+   ch('With hp = 30, which message prints?',['Low health!','Feeling fine.','Both','Nothing'],'30 is less than 50, so the `if` block runs.',{code:'let hp = 30;\nif hp < 50 {\n    println!("Low health!");\n} else {\n    println!("Feeling fine.");\n}'}),
+   ch('Which checks that two values are equal?',['==','=','===','equals'],'`==` compares. A single `=` assigns.',{m:1}),
+   od('Build the start of: if hp is at most 0.',['if','hp','<=','0','{'],['}','=>'],'`<=` means less than or equal to.'),
+   ch('Which is a correct Rust if?',['if gold > 10 { }','if gold > 10 then { }','if gold > 10: ','when gold > 10 { }'],'Rust uses `if condition { ... }` with no `then` and no colon.',{m:1})
+  ]},
+ {title:'Match the door',learn:{
+   text:['`match` compares one value against several patterns and runs the first one that fits.','The pattern `_` is the catch-all. It matches anything not listed above it.'],
+   code:'let door = 2;\nmatch door {\n    1 => println!("Treasure!"),\n    2 => println!("A trap!"),\n    _ => println!("Empty room."),\n}'},
+  qs:[
+   ch('With door = 2, what prints?',['A trap!','Treasure!','Empty room.','Nothing'],'The pattern `2` matches.',{code:'let door = 2;\nmatch door {\n    1 => println!("Treasure!"),\n    2 => println!("A trap!"),\n    _ => println!("Empty room."),\n}'}),
+   ch('In a match, what does _ mean?',['Any other value (the catch-all)','A blank comment','The first value','An error'],'`_` catches everything the earlier patterns missed.'),
+   ch('With door = 7, what prints?',['Empty room.','Treasure!','A trap!','Compile error'],'7 matches neither 1 nor 2, so `_` runs.',{code:'let door = 7;\nmatch door {\n    1 => println!("Treasure!"),\n    2 => println!("A trap!"),\n    _ => println!("Empty room."),\n}'}),
+   ty('Type the catch-all pattern.',['_'],'A single underscore.','match door {\n    1 => println!("Treasure!"),\n    ___ => println!("Nothing here."),\n}')
+  ]}
+]},
+{title:'Endless Halls',sub:'Repeat actions with loops',color:'#7fb0ff',foe:{name:'Ghost',s:'ghost',p:'ghost'},levels:[
+ {title:'Loop and while',learn:{
+   text:['`loop` repeats forever until you write `break`. `while` repeats as long as its condition stays true.','Something inside a `while` must eventually make the condition false, or the loop never ends.'],
+   code:'let mut hp = 3;\nwhile hp > 0 {\n    println!("Ouch! hp = {}", hp);\n    hp = hp - 1;\n}'},
+  qs:[
+   ch('Which keyword repeats code forever until you break out?',['loop','forever','repeat','again'],'`loop` runs until `break`.',{m:1}),
+   ch('How many times does Ouch! print?',['3','2','4','0'],'hp is 3, then 2, then 1. At 0 the loop stops.',{code:'let mut hp = 3;\nwhile hp > 0 {\n    println!("Ouch! hp = {}", hp);\n    hp = hp - 1;\n}'}),
+   ch('How do you leave a loop early?',['break','exit','stop','end loop'],'`break` jumps out of the loop.',{m:1}),
+   ch('What is the bug here?',['hp never changes, so it loops forever','hp is not mutable','while needs parentheses','println! needs a number'],'Nothing inside the loop lowers hp.',{code:'let mut hp = 3;\nwhile hp > 0 {\n    println!("Ouch!");\n}'})
+  ]},
+ {title:'For each floor',learn:{
+   text:['`for` walks through a range of numbers. `1..4` gives 1, 2, 3. The end is left out.','Write `1..=4` to include the end. That gives 1, 2, 3, 4.'],
+   code:'for floor in 1..4 {\n    println!("Floor {}", floor);\n}'},
+  qs:[
+   ch('What does `for n in 1..4` count?',['1, 2, 3','1, 2, 3, 4','0, 1, 2, 3','2, 3, 4'],'The end of `..` is excluded.'),
+   ch('Which range includes the 5?',['1..=5','1..5','1...5','1-5'],'`..=` includes the last number.',{m:1}),
+   ch('How many times does Swing! print?',['5','4','6','0'],'`0..5` gives 0, 1, 2, 3, 4.',{code:'for _ in 0..5 {\n    println!("Swing!");\n}'}),
+   od('Build a for loop header for floors 1 to 3, including 3.',['for','floor','in','1..=3','{'],['while','1..3'],'`1..=3` includes 3.')
+  ]}
+]},
+{title:'Spell Book',sub:'Package actions into functions',color:'#55d6e6',foe:{name:'Spell Slime',s:'slime',p:'blue'},levels:[
+ {title:'Cast a function',learn:{
+   text:['`fn` defines a function. Its inputs are parameters, each with a type. `-> i32` says what it gives back.','The last line, written without a semicolon, is the value the function returns.'],
+   code:'fn heal(hp: i32, potion: i32) -> i32 {\n    hp + potion\n}\n\nlet new_hp = heal(40, 25);'},
+  qs:[
+   ch('Which keyword defines a function?',['fn','func','def','function'],'Rust uses `fn`.',{m:1}),
+   ch('What is new_hp?',['65','40','25','heal'],'40 + 25 = 65.',{code:'fn heal(hp: i32, potion: i32) -> i32 {\n    hp + potion\n}\n\nlet new_hp = heal(40, 25);'}),
+   ch('What does `-> i32` say?',['The function returns an i32 number','The function takes an i32 arrow','The function is private','The function loops'],'The arrow names the return type.'),
+   ch('Why is there no semicolon after hp + potion?',['Without ; the last line is the returned value','Functions cannot have semicolons','It is a comment','A function can only have one line'],'A semicolon would turn the value into a plain statement and nothing would be returned.')
+  ]},
+ {title:'Parameters and returns',learn:{
+   text:['Every parameter needs a type. You call a function by writing its name and the values in brackets.','`if` can produce a value too, so each branch can end with the number to return.'],
+   code:'fn deal_damage(base: i32, crit: bool) -> i32 {\n    if crit {\n        base * 2\n    } else {\n        base\n    }\n}'},
+  qs:[
+   ch('What does deal_damage(10, true) return?',['20','10','0','true'],'A crit doubles the base damage.'),
+   ch('What does deal_damage(10, false) return?',['10','20','0','false'],'No crit, so the base damage comes back unchanged.'),
+   ch('Which call is valid?',['add(2, 3)','add(2)','add("2", "3")','add 2 3'],'It needs exactly two `i32` values in brackets.',{code:'fn add(a: i32, b: i32) -> i32 {\n    a + b\n}',m:1}),
+   od('Build a header: is_alive takes hp as an i32 and returns a bool.',['fn','is_alive','(hp: i32)','->','bool','{'],['=>','i32'],'Parameters go in brackets and the return type follows `->`.')
+  ]}
+]},
+{title:'Hero Blueprint',sub:'Design your player with structs',color:'#ff8b9a',foe:{name:'Armored Skull',s:'skull',p:'redskull'},levels:[
+ {title:'Build a struct',learn:{
+   text:['A `struct` groups related values into one type. Your hero can hold a name, health and a position in one place.','Read a field with a dot, like `hero.hp`.'],
+   code:'struct Player {\n    name: String,\n    hp: i32,\n    x: f32,\n    y: f32,\n}\n\nlet hero = Player {\n    name: String::from("Mira"),\n    hp: 100,\n    x: 0.0,\n    y: 0.0,\n};\nprintln!("{}", hero.hp);'},
+  qs:[
+   ch('Which keyword groups fields into your own type?',['struct','class','object','group'],'Rust uses `struct`.',{m:1}),
+   ch('How do you read the hero’s hp?',['hero.hp','hero->hp','hero[hp]','hp.hero'],'Fields are read with a dot.',{m:1}),
+   ch('What does the println! show?',['100','hp','Mira','0.0'],'`hero.hp` is 100.',{code:'let hero = Player {\n    name: String::from("Mira"),\n    hp: 100,\n    x: 0.0,\n    y: 0.0,\n};\nprintln!("{}", hero.hp);'}),
+   ch('To change hero.hp later, how must hero be declared?',['let mut hero','let hero','const hero','It always can change'],'Changing any field needs `mut`.',{m:1})
+  ]},
+ {title:'Give it moves',learn:{
+   text:['`impl` attaches methods to a struct. Inside, `self` is the value the method was called on.','`&self` only reads. `&mut self` can change the value. You call a method with a dot.'],
+   code:'impl Player {\n    fn take_hit(&mut self, dmg: i32) {\n        self.hp = self.hp - dmg;\n    }\n    fn is_alive(&self) -> bool {\n        self.hp > 0\n    }\n}\n\nhero.take_hit(30);'},
+  qs:[
+   ch('Which keyword attaches methods to a struct?',['impl','method','extend','with'],'Methods live inside an `impl` block.',{m:1}),
+   ch('Why does take_hit use &mut self?',['It changes the player’s hp','It prints the hp','It returns a number','It copies the player'],'`&mut self` allows the method to change fields.'),
+   ch('hp is 100. What is hero.hp after take_hit(30)?',['70','100','30','130'],'100 - 30 = 70.'),
+   ch('How do you call the method?',['hero.take_hit(30)','take_hit(hero, 30)','hero::take_hit 30','Player.take_hit(30)'],'Use a dot after the value.',{m:1})
+  ]}
+]},
+{title:'Monster Manual',sub:'Model enemies with enums and Option',color:'#ffa45c',foe:{name:'Blood Bat',s:'bat',p:'redbat'},levels:[
+ {title:'Kinds of enemy',learn:{
+   text:['An `enum` is a value that is exactly one of several named kinds. Write a kind as `EnumName::Kind`.','`match` must cover every kind, or the code will not compile. That catches forgotten enemies for you.'],
+   code:'enum Enemy {\n    Slime,\n    Bat,\n    Skeleton,\n}\n\nlet foe = Enemy::Bat;\nlet reward = match foe {\n    Enemy::Slime => 5,\n    Enemy::Bat => 8,\n    Enemy::Skeleton => 12,\n};'},
+  qs:[
+   ch('How do you write the Bat kind?',['Enemy::Bat','Enemy.Bat','Enemy->Bat','Bat::Enemy'],'Kinds use a double colon.',{m:1}),
+   ch('foe is Enemy::Bat. What is reward?',['8','5','12','0'],'The Bat arm gives 8.'),
+   ch('What if a match skips a kind and has no _ ?',['Compile error: not every case is covered','It runs fine','It picks the first arm','It returns 0'],'Rust makes you handle every case.'),
+   ch('An enemy is exactly one of Slime, Bat or Skeleton. Which fits best?',['enum','struct','loop','fn'],'An `enum` is a choice between named kinds.',{m:1})
+  ]},
+ {title:'Maybe a key',learn:{
+   text:['`Option` holds either `Some(value)` or `None`. Use it when something might be missing, like a key the hero may not have.','Rust has no null. You must `match` an Option, so you cannot forget the missing case.'],
+   code:'fn find_key(has_key: bool) -> Option<i32> {\n    if has_key { Some(7) } else { None }\n}\n\nmatch find_key(true) {\n    Some(id) => println!("Key {}", id),\n    None => println!("No key."),\n}'},
+  qs:[
+   ch('Which two values can an Option hold?',['Some(value) and None','true and false','Ok and Err','Left and Right'],'It is either `Some` with a value inside, or `None`.',{m:1}),
+   ch('What does find_key(true) print?',['Key 7','No key.','Key true','Nothing'],'`Some(7)` matches the first arm, and id is 7.'),
+   ch('What does find_key(false) print?',['No key.','Key 7','Key 0','Compile error'],'`None` matches the second arm.'),
+   ch('Why does Rust use Option instead of null?',['It forces you to handle the missing case','It is shorter to type','Rust has no numbers','Null is a keyword for loops'],'The compiler will not let you skip the `None` case.')
+  ]}
+]},
+{title:'Backpack',sub:'Hold items in a Vec and borrow them safely',color:'#b4e55a',foe:{name:'Moss Ghost',s:'ghost',p:'mossghost'},levels:[
+ {title:'Lists of loot',learn:{
+   text:['A `Vec` is a growing list. `vec![]` makes one, `push` adds an item, and `len()` counts them.','Positions start at 0, so the first item is `bag[0]`.'],
+   code:'let mut bag = vec!["torch", "potion"];\nbag.push("key");\nprintln!("{}", bag.len());   // 3\nprintln!("{}", bag[0]);      // torch\nfor item in &bag {\n    println!("{}", item);\n}'},
+  qs:[
+   ch('How many items are in bag after the push?',['3','2','1','4'],'torch, potion and key make three.',{code:'let mut bag = vec!["torch", "potion"];\nbag.push("key");'}),
+   ch('What is bag[0]?',['"torch"','"potion"','"key"','0'],'Counting starts at 0, so index 0 is the first item.',{code:'let bag = vec!["torch", "potion", "key"];',m:1}),
+   ch('To push into a bag, how must it be declared?',['let mut bag','let bag','const bag','bag!'],'Adding items changes the list, so it needs `mut`.',{m:1}),
+   ch('Which index is the last of 3 items?',['2','3','1','-1'],'Indexes are 0, 1 and 2.',{m:1})
+  ]},
+ {title:'Borrowing',learn:{
+   text:['Every value has one owner. Giving a value away moves it, and the old name stops working.','Put `&` in front to borrow a value to read it, or `&mut` to borrow it and change it. The owner keeps the value.'],
+   code:'fn show(bag: &Vec<&str>) {\n    println!("{} items", bag.len());\n}\n\nlet bag = vec!["torch", "potion"];\nshow(&bag);\nshow(&bag); // fine, we only borrowed'},
+  qs:[
+   ch('What does the & in front of bag mean here?',['Borrow it without taking ownership','Make it faster','Delete it','Copy it forever'],'`&` lets the function look at the value while you keep ownership.',{code:'show(&bag);'}),
+   ch('Which lets a function change your list without taking it?',['&mut Vec<&str>','&Vec<&str>','*Vec<&str>','Vec<&str>&'],'`&mut` is a borrow that can change.',{m:1}),
+   ch('Why is this an error?',['a was moved into b, so a is gone','Strings cannot be printed','b is not mut','println! needs two arguments'],'After `let b = a;`, only b owns the String.',{code:'let a = String::from("sword");\nlet b = a;\nprintln!("{}", a);'}),
+   ch('How many owners can a value have at once?',['One','Two','Unlimited','Zero'],'Exactly one owner. Everyone else borrows.')
+  ]}
+]},
+{title:'Game Loop and Gravity',sub:'Make a hero fall, land and jump, then pick an engine',color:'#ffd166',foe:{name:'Stone Golem',s:'golem',p:'golem'},levels:[
+ {title:'Fall and land',learn:{
+   text:['A game is one big loop. Each frame it updates speeds and positions, then draws.','Gravity adds to the vertical speed `vy` every frame, so a fall gets faster. In most 2D engines y grows downward, so a jump uses a negative vy.'],
+   code:'let gravity: f32 = 0.5;\nlet mut vy: f32 = 0.0;\nlet mut y: f32 = 0.0;\nlet floor: f32 = 100.0;\n\nloop {\n    vy = vy + gravity;   // fall faster each frame\n    y = y + vy;          // move\n    if y >= floor {\n        y = floor;       // land\n        vy = 0.0;\n        break;\n    }\n}'},
+  qs:[
+   ch('Each frame vy grows by gravity. What happens to falling speed?',['It increases every frame','It stays the same','It becomes zero','It flips sign'],'Adding gravity each frame is acceleration.'),
+   ch('Why set y = floor when y >= floor?',['So the hero does not sink through the floor','To make the jump higher','To print the position','Because floor is mut'],'It snaps the hero back onto the ground.'),
+   ch('To make the hero jump when y grows downward, set vy to…',['A negative number','A bigger gravity','floor','break'],'A negative vy moves the hero up the screen.'),
+   od('Build the line that adds speed to position.',['x','=','x','+','speed',';'],['-','vx'],'Position plus speed is the new position.')
+  ]},
+ {title:'Pick your engine',learn:{
+   text:['A crate is a Rust library. `cargo` is Rust’s build tool: it creates projects, downloads crates and runs your game.','`macroquad` is a small 2D game crate that works well for a first platformer. `bevy` is bigger and more powerful when you are ready for it.','Install Rust from rustup.rs, then try the commands below in a terminal.'],
+   code:'cargo new dungeon_fighter\ncd dungeon_fighter\ncargo add macroquad\ncargo run'},
+  qs:[
+   ch('Which command creates a new Rust project?',['cargo new dungeon_fighter','rust create dungeon_fighter','cargo init-game','npm init'],'`cargo new` makes a fresh project folder.',{m:1}),
+   ch('What is a crate?',['A Rust library or package','A type of loop','A memory error','An enemy'],'Crates are how you share and reuse Rust code.'),
+   ch('Which command builds and runs your project?',['cargo run','cargo play','rust go','cargo start'],'`cargo run` compiles and then launches your program.',{m:1}),
+   ch('Which crate is a simple 2D game library for a first platformer?',['macroquad','serde','clap','rand_chacha'],'`macroquad` handles windows, drawing and input.',{m:1})
+  ]}
+]}
+];
+
+['hello','stats','fork','loops','funcs','structs','enums','vec','gameloop'].forEach(function(id,i){UNITS[i].id=id});
+
+var NEW_UNITS=[
+{id:'text',title:'Words of Power',sub:'Build and show text with String',color:'#ff9ee0',foe:{name:'Whisper Wraith',s:'ghost',p:'pinkghost'},levels:[
+ {title:'Strings that grow',learn:{
+   text:['Rust has two text types. `&str` is fixed text written in your code. `String` is text you own, and it can grow.','Make one with `String::from("Mira")`. `push_str` adds more text on the end, so the variable needs `mut`.'],
+   code:'let title: &str = "Hero";\nlet mut name = String::from("Mira");\nname.push_str(" the Bold");\nprintln!("{}", name);   // Mira the Bold'},
+  qs:[
+   ch('Which type can grow after you create it?',['String','&str','i32','bool'],'A `String` owns its text and can grow. A `&str` is fixed.',{m:1}),
+   ch('What is name now?',['Mira the Bold','Mira','the Bold','Mira the'],'`push_str` adds text to the end.',{code:'let mut name = String::from("Mira");\nname.push_str(" the Bold");'}),
+   ch('Which line makes a String from text?',['String::from("Mira")','String("Mira")','new String("Mira")','"Mira".String'],'Use `String::from`.',{m:1}),
+   ch('Why won’t this compile?',['name is not declared with mut','push_str does not exist','Strings cannot hold !','from needs two arguments'],'`push_str` changes the String, so the variable must be `mut`.',{code:'let name = String::from("Mira");\nname.push_str("!");'})
+  ]},
+ {title:'Format a message',learn:{
+   text:['`format!` works like `println!`, but it gives you a `String` instead of printing it. That is perfect for score and health text on screen.','You can also put a variable name straight inside the braces, like `{hp}`.'],
+   code:'let name = "Mira";\nlet hp = 80;\nlet line = format!("{} has {} HP", name, hp);\nprintln!("{}", line);          // Mira has 80 HP\nprintln!("{name} is ready");   // Mira is ready'},
+  qs:[
+   ch('What does format! do differently from println!?',['It builds a String instead of printing','It prints in colour','It reads input','It repeats text'],'`format!` returns the text so you can store or draw it.'),
+   ch('What is line?',['Mira has 80 HP','{} has {} HP','Mira 80','Mira has HP 80'],'Each `{}` is filled in order.',{code:'let line = format!("{} has {} HP", "Mira", 80);'}),
+   ch('What prints?',['HP: 45','HP: {hp}','HP: hp','HP: '],'`{hp}` is replaced by the variable’s value.',{code:'let hp = 45;\nprintln!("HP: {hp}");'}),
+   od('Build a line that makes a String saying Score: 10.',['format!(','"Score: {}"',',','10',')',';'],['println!(','print'],'`format!` takes a template and the values to fill in.','')
+  ]}
+]},
+{id:'grid',title:'Map Coordinates',sub:'Tuples, arrays and tile maps',color:'#8ee6d2',foe:{name:'Tile Slime',s:'slime',p:'tealslime'},levels:[
+ {title:'Tuples',learn:{
+   text:['A tuple groups a few values, even of different types, inside round brackets. Read them with a dot and a number: `.0`, `.1`.','You can also unpack a tuple into separate variables in one line. That suits an (x, y) position.'],
+   code:'let spawn: (f32, f32) = (12.0, 4.5);\nprintln!("{}", spawn.0);   // 12\nlet (x, y) = spawn;        // unpack\nprintln!("{} {}", x, y);'},
+  qs:[
+   ch('How do you read the second value of a tuple called spawn?',['spawn.1','spawn[1]','spawn(1)','spawn.second'],'Tuple fields are numbered from 0 and read with a dot.',{m:1}),
+   ch('What is y?',['7','3','(3, 7)','10'],'The tuple is unpacked in order, so x is 3 and y is 7.',{code:'let pos = (3, 7);\nlet (x, y) = pos;'}),
+   ch('Which type holds an x and y position as decimals?',['(f32, f32)','(i32, bool)','[i32; 2]','&str'],'Two `f32` values in a tuple.',{m:1}),
+   ch('What is a tuple good for?',['Grouping a few values, even of different types','Looping forever','Printing text','Naming a function'],'It bundles a small fixed group of values.')
+  ]},
+ {title:'Arrays and tile maps',learn:{
+   text:['An array holds a fixed number of values of one type. `[i32; 5]` means five `i32` values. It cannot grow, and counting starts at 0.','A tile map is an array of arrays. `map[row][column]` picks one tile. Here 0 is empty air and 1 is a solid block.'],
+   code:'let row: [i32; 5] = [1, 0, 0, 1, 1];\nprintln!("{}", row[3]);     // 1\nprintln!("{}", row.len());  // 5\n\nlet map = [\n    [0, 0, 0],\n    [0, 1, 0],\n    [1, 1, 1],\n];\nprintln!("{}", map[1][1]);  // 1'},
+  qs:[
+   ch('What does the 5 mean in [i32; 5]?',['The array holds exactly 5 values','The first value is 5','The array can grow to 5','Each value is at most 5'],'The number after the semicolon is the length.'),
+   ch('What is row[3]?',['1','0','3','4'],'Index 3 is the fourth value, which is 1.',{code:'let row = [1, 0, 0, 1, 1];'}),
+   ch('What is map[2][0]?',['1','0','2','3'],'Row 2 is the bottom row, and its first tile is 1.',{code:'let map = [\n    [0, 0, 0],\n    [0, 1, 0],\n    [1, 1, 1],\n];'}),
+   ch('Which one can grow after it is made?',['A Vec','An array','Both','Neither'],'An array has a fixed length. A `Vec` can grow.')
+  ]}
+]},
+{id:'results',title:'Traps and Errors',sub:'Handle things that can go wrong with Result',color:'#ff9a76',foe:{name:'Trap Skeleton',s:'skull',p:'purpskull'},levels:[
+ {title:'Ok or Err',learn:{
+   text:['`Result` is either `Ok(value)` when something worked, or `Err(error)` when it failed. Loading a level file is a good example.','Unlike `Option`, an `Err` carries a reason you can show or log. Use `match` to handle both cases.'],
+   code:'fn open_door(has_key: bool) -> Result<i32, String> {\n    if has_key {\n        Ok(1)\n    } else {\n        Err(String::from("The door is locked"))\n    }\n}\n\nmatch open_door(false) {\n    Ok(room) => println!("Entered room {}", room),\n    Err(msg) => println!("Error: {}", msg),\n}'},
+  qs:[
+   ch('Which two values can a Result hold?',['Ok(value) and Err(error)','Some(value) and None','true and false','Yes and No'],'`Ok` means success, `Err` means failure.',{m:1}),
+   ch('What does this print?',['Error: The door is locked','Entered room 1','Nothing','Entered room 0'],'`open_door(false)` returns the `Err`, so the second arm runs.',{code:'fn open_door(has_key: bool) -> Result<i32, String> {\n    if has_key { Ok(1) } else { Err(String::from("The door is locked")) }\n}\n\nmatch open_door(false) {\n    Ok(room) => println!("Entered room {}", room),\n    Err(msg) => println!("Error: {}", msg),\n}'}),
+   ch('When is Result better than Option?',['When failing has a reason you want to report','When you need a loop','When the value is a bool','They are always the same'],'`Err` carries the reason, `None` carries nothing.'),
+   ch('What does Ok(5) mean?',['The call worked and the value is 5','An error numbered 5','The call failed','5 attempts were made'],'`Ok` wraps a successful value.')
+  ]},
+ {title:'unwrap and the ? mark',learn:{
+   text:['`unwrap()` gives you the value inside `Ok`, but if it is an `Err` the program crashes (it panics). That is fine for quick experiments, risky in a finished game.','`?` is a shortcut inside a function that returns a `Result`: on `Err` it returns that error right away, on `Ok` it gives you the value.'],
+   code:'let room = open_door(true).unwrap();   // 1\n// open_door(false).unwrap() would crash!\n\nfn enter(has_key: bool) -> Result<i32, String> {\n    let room = open_door(has_key)?;   // Err returns early\n    Ok(room + 10)\n}'},
+  qs:[
+   ch('What happens when you unwrap() an Err?',['The program crashes (panics)','It returns 0','It is ignored','It becomes None'],'`unwrap` panics on `Err`.'),
+   ch('What does ? at the end of a call do?',['Returns the error early, or gives the Ok value','Asks the player a question','Makes the value optional','Ignores errors'],'It either unwraps the `Ok` or returns the `Err` to the caller.'),
+   ch('Which is safest in a finished game?',['Handle the Err with match','Use unwrap everywhere','Ignore the returned value','Delete the Err'],'Handling the `Err` keeps the game from crashing.'),
+   ch('What is r?',['Ok(11)','Ok(1)','Err("locked")','11'],'`open_door(true)` is `Ok(1)`, then `enter` returns `Ok(1 + 10)`.',{code:'fn open_door(has_key: bool) -> Result<i32, String> {\n    if has_key { Ok(1) } else { Err(String::from("locked")) }\n}\n\nfn enter(has_key: bool) -> Result<i32, String> {\n    let room = open_door(has_key)?;\n    Ok(room + 10)\n}\n\nlet r = enter(true);',m:1})
+  ]}
+]},
+{id:'traits',title:'Shared Powers',sub:'Give different types the same abilities with traits',color:'#c4a7ff',foe:{name:'Shadow Bat',s:'bat',p:'bluebat'},levels:[
+ {title:'Define a trait',learn:{
+   text:['A trait is a promise: a list of methods that any type can agree to provide. Different types can keep that promise in different ways.','`impl Trait for Type` is how a type signs up. Now a Slime and a Dragon can both attack, with very different damage.'],
+   code:'trait Attack {\n    fn damage(&self) -> i32;\n}\n\nstruct Slime;\nstruct Dragon;\n\nimpl Attack for Slime {\n    fn damage(&self) -> i32 { 3 }\n}\nimpl Attack for Dragon {\n    fn damage(&self) -> i32 { 40 }\n}\n\nlet s = Slime;\nprintln!("{}", s.damage());   // 3'},
+  qs:[
+   ch('What is a trait?',['A list of methods a type promises to provide','A kind of loop','A number type','A file'],'A trait describes behaviour that types can share.'),
+   ch('Which line makes Slime follow the Attack trait?',['impl Attack for Slime','trait Slime = Attack','Slime extends Attack','use Attack on Slime'],'`impl Trait for Type` is the syntax.',{m:1}),
+   ch('What does this print?',['40','3','0','Dragon'],'This Dragon’s `damage` returns 40.',{code:'trait Attack {\n    fn damage(&self) -> i32;\n}\nstruct Dragon;\nimpl Attack for Dragon {\n    fn damage(&self) -> i32 { 40 }\n}\nlet d = Dragon;\nprintln!("{}", d.damage());'}),
+   ch('Why give Slime and Dragon the same trait?',['Both can then be treated as things that attack','To make them identical','To skip writing methods','Traits make code run faster'],'Shared behaviour lets other code work with either one.')
+  ]},
+ {title:'Debug and clone',learn:{
+   text:['`#[derive(Debug)]` above a struct lets you print it with `{:?}`, which is great for checking values while you build.','`#[derive(Clone)]` adds `.clone()`, which makes an independent copy, so the original stays usable.'],
+   code:'#[derive(Debug, Clone)]\nstruct Item {\n    name: String,\n    power: i32,\n}\n\nlet sword = Item { name: String::from("Sword"), power: 7 };\nlet spare = sword.clone();\nprintln!("{:?}", spare);   // Item { name: "Sword", power: 7 }'},
+  qs:[
+   ch('Which attribute lets you print a struct with {:?}',['#[derive(Debug)]','#[print]','#[show]','#[derive(Print)]'],'Derive `Debug`.',{m:1}),
+   ch('What does .clone() do?',['Makes an independent copy','Moves the value','Deletes the value','Borrows the value'],'`clone` duplicates the value.'),
+   ch('What does this print?',['Item { name: "Sword", power: 7 }','Sword 7','spare','Item'],'`{:?}` shows the struct’s name and fields.',{code:'#[derive(Debug, Clone)]\nstruct Item {\n    name: String,\n    power: i32,\n}\nlet sword = Item { name: String::from("Sword"), power: 7 };\nlet spare = sword.clone();\nprintln!("{:?}", spare);',m:1}),
+   ch('Why clone instead of moving the value?',['So the original is still usable','To make code faster','To change its type','Clone is needed for println!'],'A move gives the original away. A clone keeps it.')
+  ]}
+]},
+{id:'iters',title:'Loot Filters',sub:'Transform lists with closures and iterators',color:'#76d7ff',foe:{name:'Ember Slime',s:'slime',p:'embslime'},levels:[
+ {title:'Map and sum',learn:{
+   text:['A closure is a tiny unnamed function written between pipes: `|x| x * 2`.','`iter()` walks a list. `map` changes each item, `sum` adds them up, and `collect` gathers the results into a new Vec.'],
+   code:'let coins = vec![5, 10, 25];\nlet doubled: Vec<i32> = coins.iter().map(|c| c * 2).collect();\n// [10, 20, 50]\nlet total: i32 = coins.iter().sum();   // 40'},
+  qs:[
+   ch('What is `|x| x + 1`?',['A closure: a small unnamed function','A comment','A loop','A type'],'Pipes hold the closure’s inputs.'),
+   ch('What is total?',['40','25','3','5'],'5 + 10 + 25 = 40.',{code:'let coins = vec![5, 10, 25];\nlet total: i32 = coins.iter().sum();'}),
+   ch('What is doubled?',['[20, 40, 60]','[10, 20, 30]','60','[2, 4, 6]'],'`map` doubles each value.',{code:'let hp = vec![10, 20, 30];\nlet doubled: Vec<i32> = hp.iter().map(|h| h * 2).collect();',m:1}),
+   ch('What does collect() do at the end?',['Gathers the results into a new collection','Prints each item','Stops the program','Sorts the list'],'Iterator steps are lazy until something like `collect` finishes the job.')
+  ]},
+ {title:'Filter and find',learn:{
+   text:['`filter` keeps only the items that pass a test, `count` counts them, `any` asks whether at least one passes, and `find` returns the first match.','`find` gives back an `Option`, because nothing might match. The extra stars in these closures just unwrap references. The compiler will tell you when you need them.'],
+   code:'let hp = vec![0, 12, 7, 0, 30];\nlet alive = hp.iter().filter(|h| **h > 0).count();   // 3\nlet any_dead = hp.iter().any(|h| *h == 0);           // true\nlet first_big = hp.iter().find(|h| **h > 10);        // Some(12)'},
+  qs:[
+   ch('What does filter do?',['Keeps only items that pass a test','Doubles each item','Sorts items','Adds items together'],'`filter` drops everything that fails the test.'),
+   ch('How many are alive?',['3','2','5','4'],'Three of the five values are above zero.',{code:'let hp = vec![0, 12, 7, 0, 30];\nlet alive = hp.iter().filter(|h| **h > 0).count();'}),
+   ch('What does any(...) return?',['true or false','A number','A list','Nothing'],'It answers yes or no.'),
+   ch('Why does find return an Option?',['Because nothing might match','Because it is slow','Because it sorts','Because lists are empty'],'No match means `None`.')
+  ]}
+]},
+{id:'collide',title:'Hit Boxes',sub:'Detect when things touch',color:'#f78fb3',foe:{name:'Wall Golem',s:'golem',p:'wallgolem'},levels:[
+ {title:'Rectangles that overlap',learn:{
+   text:['A hitbox is an invisible rectangle around a character: an x, a y, a width and a height.','Two rectangles overlap only when they overlap on the x axis and on the y axis at the same time.'],
+   code:'struct Rect {\n    x: f32,\n    y: f32,\n    w: f32,\n    h: f32,\n}\n\nfn overlaps(a: &Rect, b: &Rect) -> bool {\n    a.x < b.x + b.w\n        && a.x + a.w > b.x\n        && a.y < b.y + b.h\n        && a.y + a.h > b.y\n}'},
+  qs:[
+   ch('What is a hitbox?',['An invisible rectangle used to detect touching','A picture of the hero','A kind of loop','A sound effect'],'Games test hitboxes instead of exact pixels.'),
+   ch('A spans x 0 to 10. B spans x 20 to 30. Do they overlap sideways?',['No, there is a gap','Yes, fully','Yes, partly','Not enough information'],'10 is less than 20, so there is a gap.'),
+   ch('A: x 0, width 10. B: x 5, width 10. On the x axis they…',['Overlap from 5 to 10','Do not touch','Match exactly','Overlap from 0 to 5'],'A covers 0 to 10 and B covers 5 to 15, so the shared part is 5 to 10.'),
+   ch('Two rectangles collide only if they overlap on…',['Both the x and y axes','Only the x axis','Only the y axis','Neither; touching is enough'],'Both axes must overlap.')
+  ]},
+ {title:'Solid tiles',learn:{
+   text:['To ask what tile a hero stands in, divide the position by the tile size and cut off the decimals with `as usize`.','Then look that tile up in the map. If it is 1, the ground is solid.'],
+   code:'let tile_size: f32 = 16.0;\nlet map = [\n    [0, 0, 0, 0],\n    [0, 0, 0, 0],\n    [1, 1, 1, 1],\n];\n\nlet x: f32 = 35.0;\nlet y: f32 = 36.0;\nlet col = (x / tile_size) as usize;   // 2\nlet row = (y / tile_size) as usize;   // 2\nlet solid = map[row][col] == 1;       // true'},
+  qs:[
+   ch('What does `(x / tile_size) as usize` give you?',['The tile column x is in, as a whole number','The width of the tile','A decimal x','The next tile over'],'Dividing finds the tile, and `as usize` turns it into an index.'),
+   ch('tile_size is 16.0 and x is 35.0. Which column?',['2','3','1','35'],'35 / 16 is about 2.2, and `as usize` keeps the 2.'),
+   ch('In this map, which row is solid ground?',['2','0','1','3'],'Row 2 is the bottom row of 1s.',{code:'let map = [\n    [0, 0, 0, 0],\n    [0, 0, 0, 0],\n    [1, 1, 1, 1],\n];'}),
+   ch('Why store a level as a grid of numbers?',['Collision checks become simple array lookups','Rust requires it','It uses less screen space','It draws faster than sprites'],'You can check a tile with one lookup.')
+  ]}
+]},
+{id:'states',title:'Game States',sub:'Menus, play, game over and attack cooldowns',color:'#a0e7a0',foe:{name:'Timer Ghost',s:'ghost',p:'ghost'},levels:[
+ {title:'States with enums',learn:{
+   text:['A game is always in exactly one state, such as the menu, playing, or game over. An `enum` models that perfectly.','`match` on the state to decide what to update and draw. Change state by assigning a new value.'],
+   code:'enum State {\n    Menu,\n    Playing,\n    GameOver,\n}\n\nlet mut state = State::Menu;\n\n// later, when the player presses start:\nstate = State::Playing;\n\nmatch state {\n    State::Menu => println!("Press start"),\n    State::Playing => println!("Fight!"),\n    State::GameOver => println!("You died"),\n}'},
+  qs:[
+   ch('Why use an enum for game states?',['The game is in exactly one state at a time','Enums run faster','Enums print text','They draw sprites'],'An enum value is always exactly one of its kinds.'),
+   ch('What prints?',['Fight!','Press start','You died','Nothing'],'The state was changed to `Playing` before the match.',{code:'let mut state = State::Menu;\nstate = State::Playing;\nmatch state {\n    State::Menu => println!("Press start"),\n    State::Playing => println!("Fight!"),\n    State::GameOver => println!("You died"),\n}'}),
+   ch('To change the state later, how must it be declared?',['let mut state','let state','const state','state!'],'Changing a variable needs `mut`.',{m:1}),
+   ch('What if you add State::Paused but forget it in the match?',['Compile error until you handle it','It silently does nothing','It crashes at runtime','It picks Menu'],'`match` must cover every kind.')
+  ]},
+ {title:'Cooldown timers',learn:{
+   text:['An attack needs a cooldown so the hero cannot swing every frame. Keep a timer in seconds and subtract the frame time `dt` each update.','Using `dt` keeps timing the same on fast and slow computers.'],
+   code:'struct Fighter {\n    cooldown: f32,\n}\n\nimpl Fighter {\n    fn update(&mut self, dt: f32) {\n        if self.cooldown > 0.0 {\n            self.cooldown = self.cooldown - dt;\n        }\n    }\n    fn try_attack(&mut self) -> bool {\n        if self.cooldown <= 0.0 {\n            self.cooldown = 0.5;   // half a second\n            true\n        } else {\n            false\n        }\n    }\n}'},
+  qs:[
+   ch('What is dt in update(dt)?',['Time since the last frame','The damage total','A direction','A data type'],'`dt` is delta time.'),
+   ch('cooldown is 0.0. What does try_attack() return?',['true','false','0.5','Nothing'],'The cooldown is ready, so the attack happens.'),
+   ch('Right after a successful attack, cooldown is…',['0.5','0.0','-0.5','true'],'It is reset to half a second.'),
+   ch('Why subtract dt instead of a fixed number each frame?',['Timing stays right on fast or slow computers','Rust requires it','To save memory','To make cooldown bigger'],'Frames take different amounts of time on different machines.')
+  ]}
+]}
+];
+
+var ALL={};
+UNITS.concat(NEW_UNITS).forEach(function(u){ALL[u.id]=u});
+
+var SECTIONS=[
+{id:'s1',title:'Dungeon Entrance',sub:'Print, store and decide',units:['hello','stats','fork'],boss:{name:'Gate Warden',s:'golem',p:'gatewarden'},recap:[
+ ch('What prints?',['15','5','10','gold'],'gold starts at 5 and becomes 5 + 10.',{code:'let mut gold = 5;\ngold = gold + 10;\nprintln!("{}", gold);'}),
+ ch('Which line is valid Rust?',['let hp: i32 = 100;','int hp = 100;','var hp = 100','let hp := 100;'],'Rust uses `let`, a name, an optional type, `=`, and a semicolon.',{m:1}),
+ ch('What prints?',['Weak','Strong','Both','Nothing'],'20 is not greater than 50, so the `else` block runs.',{code:'let hp = 20;\nif hp > 50 {\n    println!("Strong");\n} else {\n    println!("Weak");\n}'}),
+ ty('Type the missing keyword.',['mut'],'The variable changes, so it needs `mut`.','let ___ speed = 1.5;\nspeed = speed + 0.5;'),
+ ch('What does this print?',['Hero 3','Hero {}','Hero','3'],'The `{}` slot is filled with 3.',{code:'println!("Hero {}", 3);',m:1}),
+ ch('What prints?',['C','A','B','Nothing'],'3 matches neither 1 nor 2, so `_` runs.',{code:'let door = 3;\nmatch door {\n    1 => println!("A"),\n    2 => println!("B"),\n    _ => println!("C"),\n}'}),
+ od('Build a changeable variable called lives that starts at 3.',['let','mut','lives','=','3',';'],['var','const'],'`let mut name = value;`'),
+ ch('Which comparison checks that hp equals 0?',['hp == 0','hp = 0','hp === 0','hp equals 0'],'`==` compares. A single `=` assigns.',{m:1})
+]},
+{id:'s2',title:'Training Yard',sub:'Repeat, reuse and speak',units:['loops','funcs','text'],boss:{name:'Iron Knight',s:'knight',p:'ironknight'},recap:[
+ ch('What prints?',['3','2','0','4'],'n counts 0, 1, 2, 3 and stops when it reaches 3.',{code:'let mut n = 0;\nwhile n < 3 {\n    n = n + 1;\n}\nprintln!("{}", n);'}),
+ ch('How many times does `for i in 1..4` run?',['3','4','1','0'],'It counts 1, 2, 3 and leaves out 4.'),
+ ch('What is r?',['8','4','2','double'],'The function doubles 4.',{code:'fn double(x: i32) -> i32 {\n    x * 2\n}\nlet r = double(4);'}),
+ od('Build the header: square takes n: i32 and returns i32.',['fn','square','(n: i32)','->','i32','{'],['bool','=>'],'Parameters go in brackets and the return type follows `->`.'),
+ ch('What is s?',['Hi!','Hi','!','Hi !'],'`push_str` adds the text to the end.',{code:'let mut s = String::from("Hi");\ns.push_str("!");'}),
+ ch('Which makes a String saying Score: 5?',['format!("Score: {}", 5)','println!("Score: {}", 5)','"Score: " + 5','String("Score: 5")'],'`format!` builds the text. `println!` only prints it.',{m:1}),
+ ch('Why does this loop never end?',['There is no break','hp is not mut','println! is wrong','loop needs a condition'],'A `loop` runs until `break`, and there is none.',{code:'let hp = 10;\nloop {\n    println!("{}", hp);\n}'}),
+ ch('Why does this fail to compile?',['The semicolon stops 5 from being returned','5 is not an i32','fn needs let','The arrow is wrong'],'A line ending in `;` is a statement, so nothing is returned.',{code:'fn five() -> i32 {\n    5;\n}'})
+]},
+{id:'s3',title:'The Armory',sub:'Shape heroes, monsters and loot',units:['structs','enums','grid','vec'],boss:{name:'Armory Mimic',s:'chest',p:'mimic'},recap:[
+ ch('How do you read the hp?',['p.hp','p->hp','p[hp]','Player.hp'],'Fields are read with a dot.',{code:'struct Player {\n    hp: i32,\n}\nlet p = Player { hp: 40 };',m:1}),
+ ch('What is p.hp now?',['50','40','10','heal'],'40 + 10 = 50.',{code:'struct Player {\n    hp: i32,\n}\n\nimpl Player {\n    fn heal(&mut self, amount: i32) {\n        self.hp = self.hp + amount;\n    }\n}\n\nlet mut p = Player { hp: 40 };\np.heal(10);'}),
+ ch('What is dmg?',['4','2','6','0'],'The Bat arm gives 4.',{code:'enum Kind {\n    Slime,\n    Bat,\n}\nlet k = Kind::Bat;\nlet dmg = match k {\n    Kind::Slime => 2,\n    Kind::Bat => 4,\n};'}),
+ ch('What is x?',['8','3','(8, 3)','11'],'The tuple is unpacked in order.',{code:'let pos = (8, 3);\nlet (x, y) = pos;'}),
+ ch('What is row[2]?',['15','8','4','16'],'Counting from 0, index 2 is the third value.',{code:'let row = [4, 8, 15, 16];'}),
+ ch('What prints?',['3','2','1','0'],'The bag held 2 items and one was pushed.',{code:'let mut bag = vec![1, 2];\nbag.push(3);\nprintln!("{}", bag.len());'}),
+ ch('What does passing `&bag` to a function mean?',['Borrow the Vec without giving it away','Delete the Vec','Copy the Vec forever','Make the Vec mutable'],'`&` borrows a value for reading.'),
+ ch('What happens?',['Compile error: a was moved','Prints gem','Prints b','Prints nothing'],'`let b = a;` moves the String, so `a` is gone.',{code:'let a = String::from("gem");\nlet b = a;\nprintln!("{}", a);'}),
+ ch('A monster is exactly one of Slime, Bat or Skeleton. Which feature models that?',['enum','struct','loop','tuple'],'An `enum` is a choice between named kinds.',{m:1})
+]},
+{id:'s4',title:'The Deep Vaults',sub:'Handle danger, share powers, filter loot',units:['results','traits','iters'],boss:{name:'Vault Wraith',s:'ghost',p:'wraith'},recap:[
+ ch('What prints?',['err no','ok 1','Nothing','ok no'],'`check(false)` returns the `Err`, so the second arm runs.',{code:'fn check(ok: bool) -> Result<i32, String> {\n    if ok { Ok(1) } else { Err(String::from("no")) }\n}\nmatch check(false) {\n    Ok(n) => println!("ok {}", n),\n    Err(e) => println!("err {}", e),\n}'}),
+ ch('What happens if you unwrap() an Err?',['The program crashes (panics)','It returns 0','It is ignored','It becomes None'],'`unwrap` panics on `Err`.'),
+ ch('Which Option value means nothing was found?',['None','Err','Ok','Null'],'`Option` is `Some(value)` or `None`.',{m:1}),
+ ch('What prints?',['2','1','0','hello'],'This Bat’s `hello` returns 2.',{code:'trait Speak {\n    fn hello(&self) -> i32;\n}\nstruct Bat;\nimpl Speak for Bat {\n    fn hello(&self) -> i32 { 2 }\n}\nlet b = Bat;\nprintln!("{}", b.hello());'}),
+ ch('Which attribute lets you print a struct with {:?}',['#[derive(Debug)]','#[print]','#[show]','#[derive(Print)]'],'Derive `Debug`.',{m:1}),
+ ch('What is total?',['6','3','1','123'],'1 + 2 + 3 = 6.',{code:'let xs = vec![1, 2, 3];\nlet total: i32 = xs.iter().sum();'}),
+ ch('What is alive?',['2','3','1','0'],'Two values are above zero.',{code:'let hp = vec![0, 5, 9];\nlet alive = hp.iter().filter(|h| **h > 0).count();'}),
+ ch('Inside a function that returns Result, what does ? do on a Result?',['Returns the error early, or gives the Ok value','Crashes the program','Ignores the error','Turns it into None'],'It unwraps `Ok` or returns the `Err` to the caller.')
+]},
+{id:'s5',title:'The Boss Floor',sub:'Make the hero move, hit and fight',units:['gameloop','collide','states'],boss:{name:'Dragon',s:'dragon',p:'dragon'},recap:[
+ ch('Each frame vy grows by gravity. What does the fall look like?',['It speeds up','Constant speed','It slows down','It stops'],'Adding gravity every frame is acceleration.'),
+ ch('y grows downward. To jump you set vy to…',['A negative number','A positive number','Zero','floor'],'A negative vy moves the hero up the screen.'),
+ ch('Two rectangles collide only if they overlap on…',['Both the x and y axes','Only x','Only y','Neither'],'Both axes must overlap.'),
+ ch('What is col?',['3','2','4','50'],'50 / 16 is about 3.1, and `as usize` keeps the 3.',{code:'let tile = 16.0;\nlet x = 50.0;\nlet col = (x / tile) as usize;'}),
+ ch('Which type fits Menu, Playing and GameOver best?',['enum','f32','Vec','tuple'],'The game is in exactly one state at a time.',{m:1}),
+ ch('What is dt?',['Time since the last frame','Damage taken','A direction','The hero’s height'],'It is the frame time, used to keep timing steady.',{code:'fn update(&mut self, dt: f32) {\n    self.cooldown = self.cooldown - dt;\n}'}),
+ ch('Which command builds and runs your Rust game?',['cargo run','rust start','cargo play','run game'],'`cargo run` compiles and launches the project.',{m:1}),
+ ch('Why does landing code set y = floor?',['It keeps the hero from sinking through the floor','It makes the jump higher','It prints the height','It stops gravity forever'],'It snaps the hero back onto the ground.'),
+ od('Build the line that adds gravity to vertical speed.',['vy','=','vy','+','gravity',';'],['-','vx'],'Speed plus gravity is the new speed.')
+]}
+];
+
+var LEVELS=[],UNIT_NO=0;
+SECTIONS.forEach(function(sec,si){
+  sec.uobjs=sec.units.map(function(id){var u=ALL[id];u.no=++UNIT_NO;return u});
+  sec.uobjs.forEach(function(u){u.levels.forEach(function(lv,li){LEVELS.push({key:u.id+'-'+li,sec:si,unit:u,li:li,level:lv,idx:LEVELS.length})})});
+  var names=sec.uobjs.map(function(u){return u.title}).join(', ');
+  sec.rlevel={key:'recap-'+sec.id,sec:si,recap:true,unit:{title:sec.title,foe:sec.boss},li:0,idx:LEVELS.length,
+    level:{title:'Section recap',learn:{text:['A boss guards the end of this section. Every question mixes ideas from '+names+'.','You get 5 hearts. Take your time and read each question closely.'],code:null},qs:sec.recap}};
+  LEVELS.push(sec.rlevel);
+});
+
+/* ---------- cosmetics (32 x 32 hero) ---------- */
+var SLOTS=[{id:'hat',label:'Hats'},{id:'armor',label:'Armor'},{id:'cape',label:'Capes'},{id:'weapon',label:'Weapons'},{id:'pet',label:'Pets'}];
+var OUT='#14172a',SKIN='#ffd2a8',BOOT='#3a2a22',GOLD='#ffd166',WOOD='#b0703c';
+function sh(hex,f){var n=parseInt(hex.slice(1),16),c=[n>>16&255,n>>8&255,n&255].map(function(v){return Math.round(f<0?v*(1+f):v+(255-v)*f)});return '#'+c.map(function(v){return ('0'+v.toString(16)).slice(-2)}).join('')}
+function mirror(R,x,y,w,h,c){R(31-x-(w-1),y,w,h,c)}
+function capeDraw(c,t){var d=sh(c,-.25);return function(P,R){R(6,17,3,2,c);R(5,19,4,9,c);R(4,28,5,2,t);R(7,19,1,9,d);R(6,17,1,2,sh(c,.2))}}
+var ITEMS=[
+ {id:'armor-blue',slot:'armor',name:'Squire Blue',price:0,pal:{b:'#4b7bff',s:'#c9d2ff',r:'#ff6b7a'}},
+ {id:'armor-crimson',slot:'armor',name:'Crimson Plate',price:40,pal:{b:'#d9384f',s:'#ffd0d6',r:'#ffd166'}},
+ {id:'armor-forest',slot:'armor',name:'Forest Mail',price:40,pal:{b:'#2fa86b',s:'#cdeedd',r:'#f5f5f5'}},
+ {id:'armor-royal',slot:'armor',name:'Royal Purple',price:70,pal:{b:'#8a5cf0',s:'#e0d4ff',r:'#ffd166'}},
+ {id:'armor-shadow',slot:'armor',name:'Shadow Armor',price:90,pal:{b:'#2b2f4d',s:'#8f98c0',r:'#7fb0ff'}},
+ {id:'armor-gold',slot:'armor',name:'Golden Plate',price:150,pal:{b:'#e8b020',s:'#fff0b0',r:'#c0394f'}},
+
+ {id:'hat-party',slot:'hat',name:'Party Hat',price:30,draw:function(P,R){
+   var h='#ff6bb5',d='#d94a93',H='#ffe27a';
+   R(15,0,2,2,H);R(15,2,2,1,h);R(14,3,4,2,h);R(13,5,6,2,h);R(12,7,8,1,h);R(11,8,10,1,h);R(10,9,12,1,H);
+   R(17,3,1,2,d);R(18,5,1,2,d);R(19,7,1,1,d);R(20,8,1,1,d);
+   P(15,4,H);P(14,6,H);P(17,6,H);P(13,8,H);P(16,8,H);P(19,8,H)}},
+ {id:'hat-viking',slot:'hat',name:'Viking Helm',price:60,draw:function(P,R){
+   var h='#9aa3c7',d='#6b7399',H='#ece6d2';
+   R(12,5,8,1,h);R(11,6,10,3,h);R(10,9,12,1,d);R(15,10,2,3,h);
+   R(12,5,3,1,'#d9e0ff');R(11,6,1,2,'#d9e0ff');R(19,6,2,3,d);
+   R(9,6,2,2,H);R(8,4,2,2,H);P(8,3,H);mirror(R,9,6,2,2,H);mirror(R,8,4,2,2,H);P(23,3,H)}},
+ {id:'hat-wizard',slot:'hat',name:'Wizard Hat',price:90,draw:function(P,R){
+   var h='#6a4bd6',d='#4a31a8',H=GOLD;
+   R(7,8,18,2,h);R(7,9,18,1,d);R(11,6,10,2,h);R(12,4,8,2,h);R(13,2,6,2,h);R(14,1,4,1,h);R(15,0,3,1,h);
+   R(19,4,1,4,d);R(18,2,1,2,d);R(11,7,10,1,H);
+   P(15,4,H);R(14,5,3,1,H);P(15,6,H)}},
+ {id:'hat-crown',slot:'hat',name:'Golden Crown',price:140,draw:function(P,R){
+   var H=GOLD,d='#d19a1f';
+   R(10,7,12,3,H);R(10,4,2,3,H);R(15,3,2,4,H);R(20,4,2,3,H);R(10,9,12,1,d);R(21,7,1,3,d);
+   P(11,7,'#fff3b0');P(15,3,'#fff3b0');P(12,8,'#ff5d6c');R(15,8,2,1,'#5fd9ff');P(19,8,'#ff5d6c')}},
+
+ {id:'cape-red',slot:'cape',name:'Red Cape',price:50,draw:capeDraw('#d9384f','#8f1d33')},
+ {id:'cape-shadow',slot:'cape',name:'Shadow Cape',price:70,draw:capeDraw('#3a3f6b','#1f2340')},
+ {id:'cape-royal',slot:'cape',name:'Royal Cape',price:110,draw:capeDraw('#7b4de0',GOLD)},
+
+ {id:'weapon-sword',slot:'weapon',name:'Iron Sword',price:40,draw:function(P,R){
+   R(25,5,2,15,'#c9d2ff');R(25,5,1,15,'#ffffff');R(26,6,1,13,'#9aa3c7');R(25,4,2,1,'#c9d2ff');P(25,3,'#ffffff');
+   R(23,20,6,1,GOLD);R(25,21,2,4,WOOD);R(25,25,2,1,GOLD)}},
+ {id:'weapon-axe',slot:'weapon',name:'Battle Axe',price:80,draw:function(P,R){
+   R(25,8,2,17,WOOD);R(26,8,1,17,'#8a5a2c');
+   R(27,5,3,1,'#9aa3c7');R(27,6,4,1,'#9aa3c7');R(27,7,5,4,'#9aa3c7');R(27,11,4,1,'#9aa3c7');R(27,12,3,1,'#9aa3c7');
+   R(31,7,1,4,'#ffffff');R(27,7,2,1,'#d9e0ff');R(25,25,2,1,'#8a5a2c')}},
+ {id:'weapon-staff',slot:'weapon',name:'Magic Staff',price:90,draw:function(P,R){
+   R(25,9,2,16,WOOD);R(26,9,1,16,'#8a5a2c');R(24,8,4,1,GOLD);
+   R(25,3,2,1,'#ff8fe0');R(24,4,4,3,'#ff8fe0');R(25,7,2,1,'#ff8fe0');P(25,4,'#ffffff');P(26,5,'#d94fb0');P(27,6,'#d94fb0');
+   P(23,2,'#ffd0f0');P(28,8,'#ffd0f0');P(22,6,'#ffd0f0')}},
+ {id:'weapon-flame',slot:'weapon',name:'Flame Sword',price:140,draw:function(P,R){
+   R(25,5,2,15,'#ff7a2f');R(25,6,1,13,GOLD);R(26,7,1,11,'#d9501a');R(25,3,2,2,GOLD);P(26,2,GOLD);
+   P(24,4,GOLD);P(27,6,GOLD);P(24,9,GOLD);P(27,12,GOLD);P(24,15,GOLD);P(27,17,'#ff7a2f');
+   R(23,20,6,1,GOLD);R(25,21,2,4,WOOD);R(25,25,2,1,GOLD)}},
+
+ {id:'pet-slime',slot:'pet',name:'Slime Buddy',price:60,draw:function(P,R){
+   var p='#5fd99a',d='#2b9d6b';
+   R(2,24,4,1,p);R(1,25,6,1,p);R(0,26,8,3,p);R(1,29,6,1,d);R(0,28,1,1,d);R(7,28,1,1,d);
+   R(2,26,1,2,OUT);R(5,26,1,2,OUT);P(2,25,'#d6ffe8');P(3,24,'#d6ffe8')}},
+ {id:'pet-kitten',slot:'pet',name:'Kitten',price:90,draw:function(P,R){
+   var p='#ff9a4a',d='#d9742a';
+   R(1,26,5,3,p);R(1,29,2,1,d);R(4,29,2,1,d);R(4,23,4,4,p);P(4,22,p);P(7,22,p);P(4,23,'#ffd0a0');
+   P(5,24,OUT);P(7,24,OUT);P(7,25,'#ff7a8f');R(0,24,1,4,p);P(1,24,p);R(2,27,1,2,d);R(3,27,1,2,d)}},
+ {id:'pet-dragon',slot:'pet',name:'Baby Dragon',price:130,draw:function(P,R){
+   var p='#ff6b4a',d='#c4452a',u=GOLD;
+   R(1,23,3,3,u);P(2,22,u);R(1,26,5,3,p);R(2,28,3,1,u);R(1,29,2,1,d);R(4,29,2,1,d);
+   R(4,23,4,4,p);P(4,22,u);P(7,22,u);P(5,24,OUT);P(7,24,OUT);P(7,26,d);R(0,27,1,2,p);P(0,26,u)}},
+
+ {id:'hat-halo',slot:'hat',secret:true,name:'Golden Halo',price:0,draw:function(P,R){R(12,0,8,1,GOLD);R(11,1,1,1,GOLD);R(20,1,1,1,GOLD);R(12,2,8,1,GOLD);R(13,0,3,1,'#fff3b0')}},
+ {id:'armor-neon',slot:'armor',secret:true,name:'Neon Circuit',price:0,pal:{b:'#16d9c4',s:'#2a2f55',r:'#ff4fd8'}},
+ {id:'cape-rainbow',slot:'cape',secret:true,name:'Rainbow Cape',price:0,draw:function(P,R){var c=['#ff5d6c','#ff9a4a','#ffd166','#5fd99a','#5fb0ff','#b58cff'];for(var y=17;y<=29;y++){var x0=y<19?6:y<28?5:4;R(x0,y,9-x0,1,c[Math.min(5,Math.floor((y-17)/2.17))])}}},
+ {id:'weapon-thunder',slot:'weapon',secret:true,name:'Thunder Blade',price:0,draw:function(P,R){R(25,3,2,2,'#fff3b0');for(var y=5;y<=19;y++){R(y%2?25:26,y,2,1,'#ffe66b')}R(23,20,6,1,'#8f98c0');R(25,21,2,4,'#3a3f6b');R(25,25,2,1,'#ffe66b');P(23,8,'#fff3b0');P(28,12,'#fff3b0');P(24,15,'#fff3b0')}},
+ {id:'pet-ghost',slot:'pet',secret:true,name:'Tiny Ghost',price:0,draw:function(P,R){var w='#dfe9ff';R(2,23,4,1,w);R(1,24,6,4,w);P(1,28,w);P(3,28,w);P(5,28,w);R(6,24,1,4,'#b9c8f0');P(3,25,OUT);P(5,25,OUT);P(4,27,'#7f88b8')}}
+];
+var ITEM_BY={};ITEMS.forEach(function(it){ITEM_BY[it.id]=it});
+/* Redeem codes. Add your own: 'CODE':{coins:50,items:['item-id']}. Each code works once per save. */
+var CODES={
+  'RUSTACEAN':{coins:100},
+  'HELLOWORLD':{coins:50},
+  'BORROWCHECKER':{coins:75},
+  'FIRSTBLOOD':{coins:25,items:['hat-halo']},
+  'NEONKNIGHT':{items:['armor-neon']},
+  'RAINBOWRUN':{items:['cape-rainbow']},
+  'THUNDERBLADE':{items:['weapon-thunder']},
+  'BOO':{items:['pet-ghost']},
+  'DRAGONHOARD':{coins:500}
+};
+var RECAP_CODES={s1:'FIRSTBLOOD',s2:'NEONKNIGHT',s3:'RAINBOWRUN',s4:'THUNDERBLADE',s5:'BOO'};
+
+function baseDraw(a){
+  var b=a.b,B=sh(b,-.3),Lb=sh(b,.35),s=a.s,S=sh(s,-.3),L2=sh(s,.55),r=a.r,F=sh(SKIN,-.15);
+  return function(P,R){
+    R(16,3,3,1,r);R(14,4,5,1,r);R(13,5,4,1,r);R(13,6,2,1,r);
+    R(12,7,8,1,s);R(11,8,10,1,s);R(10,9,12,7,s);
+    R(12,8,3,1,L2);R(11,9,1,2,L2);R(20,9,2,7,S);R(12,10,8,1,S);R(10,15,12,1,S);
+    R(12,11,8,4,SKIN);R(12,14,8,1,F);R(14,12,1,2,OUT);R(18,12,1,2,OUT);
+    R(12,16,8,1,S);
+    R(11,17,10,7,b);R(12,18,3,2,Lb);R(19,17,2,7,B);R(15,19,2,2,GOLD);R(11,22,10,2,B);R(15,22,2,2,GOLD);
+    R(8,17,3,3,s);R(21,17,3,3,s);R(8,17,2,1,L2);R(21,17,2,1,L2);R(10,19,1,1,S);R(21,19,3,1,S);
+    R(8,20,2,4,b);R(8,24,2,2,SKIN);R(22,20,2,3,b);R(23,23,2,2,SKIN);
+    R(12,24,3,4,B);R(17,24,3,4,B);R(11,28,4,2,BOOT);R(17,28,4,2,BOOT);
+  };
+}
+function heroCells(eq){
+  var cells=[],y,x;
+  for(y=0;y<32;y++)cells.push(new Array(32).fill(null));
+  function layer(draw){
+    var g=[];for(var j=0;j<32;j++)g.push(new Array(32).fill(null));
+    var P=function(px,py,c){if(px>=0&&px<32&&py>=0&&py<32)g[py][px]=c};
+    var R=function(rx,ry,w,h,c){for(var j=0;j<h;j++)for(var i=0;i<w;i++)P(rx+i,ry+j,c)};
+    draw(P,R);
+    var add=[];
+    for(var j=0;j<32;j++)for(var i=0;i<32;i++)if(!g[j][i]&&((j>0&&g[j-1][i])||(j<31&&g[j+1][i])||(i>0&&g[j][i-1])||(i<31&&g[j][i+1])))add.push([i,j]);
+    add.forEach(function(a){g[a[1]][a[0]]=OUT});
+    for(var j2=0;j2<32;j2++)for(var i2=0;i2<32;i2++)if(g[j2][i2])cells[j2][i2]=g[j2][i2];
+  }
+  function item(slot){var it=ITEM_BY[eq[slot]];if(it&&it.slot===slot&&it.draw)layer(it.draw)}
+  var arm=ITEM_BY[eq.armor]&&ITEM_BY[eq.armor].slot==='armor'?ITEM_BY[eq.armor]:ITEM_BY['armor-blue'];
+  item('cape');item('pet');layer(baseDraw(arm.pal));item('hat');item('weapon');
+  return cells;
+}
+function heroSVG(cls,over){
+  var cells=heroCells(Object.assign({},S.eq,over||{})),r='';
+  for(var y=0;y<32;y++){var x=0;while(x<32){var c=cells[y][x];if(!c){x++;continue}var e=x;while(e<32&&cells[y][e]===c)e++;r+='<rect x="'+x+'" y="'+y+'" width="'+(e-x)+'" height="1" fill="'+c+'"/>';x=e}}
+  return '<svg class="spr hsp '+(cls||'')+'" viewBox="0 0 32 32" shape-rendering="crispEdges" aria-hidden="true">'+r+'</svg>';
+}
+
+/* ---------- progress ---------- */
+var KEY='rustdungeon.v1';
+function fresh(voice){return {xp:0,streak:0,last:'',done:{},voice:voice,coins:0,shopInit:1,owned:{'armor-blue':1},eq:{hat:'',armor:'armor-blue',cape:'',weapon:'',pet:''},final:{done:{},claimed:0,at:0},codes:{}}}
+var S=fresh({uri:'',rate:1,auto:false});S.shopInit=0;
+try{var raw=localStorage.getItem(KEY);if(raw)S=Object.assign(S,JSON.parse(raw))}catch(e){}
+(function(){
+  var OLD=['hello','stats','fork','loops','funcs','structs','enums','vec','gameloop'];
+  S.done=S.done||{};
+  S.voice=Object.assign({uri:'',rate:1,auto:false},S.voice||{});
+  Object.keys(S.done).forEach(function(k){var m=/^(\d+)-(\d+)$/.exec(k);if(m){if(OLD[+m[1]])S.done[OLD[+m[1]]+'-'+m[2]]=1;delete S.done[k]}});
+  S.owned=Object.assign({'armor-blue':1},S.owned||{});
+  S.eq=Object.assign({hat:'',armor:'armor-blue',cape:'',weapon:'',pet:''},S.eq||{});
+  Object.keys(S.eq).forEach(function(sl){var id=S.eq[sl];if(id&&(!S.owned[id]||!ITEM_BY[id]||ITEM_BY[id].slot!==sl))S.eq[sl]=sl==='armor'?'armor-blue':''});
+  if(!S.shopInit){S.coins=Object.keys(S.done).length*15;S.shopInit=1}
+  S.coins=Math.max(0,+S.coins||0);
+  S.final=Object.assign({done:{},claimed:0,at:0},S.final||{});S.final.done=S.final.done||{};
+  S.codes=S.codes&&typeof S.codes==='object'?S.codes:{};
+})();
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+function dkey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function touchStreak(){var t=new Date(),y=new Date();y.setDate(y.getDate()-1);if(S.last===dkey(t))return;S.streak=(S.last===dkey(y))?S.streak+1:1;S.last=dkey(t)}
+function streakNow(){var t=new Date(),y=new Date();y.setDate(y.getDate()-1);return(S.last===dkey(t)||S.last===dkey(y))?S.streak:0}
+var RANKS=[[0,'Villager'],[60,'Squire'],[200,'Dungeon Crawler'],[450,'Knight'],[800,'Warden'],[1200,'Champion'],[1650,'Dragon Slayer']];
+function rankInfo(xp){var i=0;RANKS.forEach(function(r,k){if(xp>=r[0])i=k});var nx=RANKS[i+1];return{name:RANKS[i][1],next:nx,from:RANKS[i][0]}}
+function curIdx(){return LEVELS.findIndex(function(l){return !S.done[l.key]})}
+
+/* ---------- icons ---------- */
+var ICON={
+  back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
+  speaker:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9.5v5h3.5L11 18.5v-13L6.5 9.5H3z"/><path d="M14.5 8.5a4.5 4.5 0 010 7M17 5.8a8 8 0 010 12.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>',
+  lock:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 10V7a5 5 0 0110 0v3h1.5A1.5 1.5 0 0120 11.5v8a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 014 19.5v-8A1.5 1.5 0 015.5 10H7zm2 0h6V7a3 3 0 00-6 0v3z"/></svg>',
+  play:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 001.5.86l10.4-6.5a1 1 0 000-1.72L9.5 4.64A1 1 0 008 5.5z"/></svg>',
+  x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg>'
+};
+
+/* ---------- read aloud ---------- */
+var TTS=('speechSynthesis' in window&&'SpeechSynthesisUtterance' in window)?window.speechSynthesis:null;
+var VOICES=[],talking=false,curUtt=null;
+function pickVoice(){
+  var v=VOICES.filter(function(x){return x.voiceURI===S.voice.uri})[0];
+  return v||VOICES.filter(function(x){return x.default})[0]||VOICES[0]||null;
+}
+function voiceOptions(){
+  var cur=pickVoice();
+  return VOICES.map(function(v){return '<option value="'+esc(v.voiceURI)+'"'+(cur&&cur.voiceURI===v.voiceURI?' selected':'')+'>'+esc(v.name)+' ('+esc(v.lang)+')</option>'}).join('');
+}
+function loadVoices(){
+  if(!TTS)return;
+  var all=TTS.getVoices()||[];
+  VOICES=all.filter(function(v){return /^en/i.test(v.lang)});
+  if(!VOICES.length)VOICES=all;
+  var sel=$('#voiceSel');if(sel)sel.innerHTML=voiceOptions();
+}
+if(TTS){loadVoices();if(TTS.addEventListener)TTS.addEventListener('voiceschanged',loadVoices)}
+function setSpeaking(on){talking=on;document.querySelectorAll('.say').forEach(function(b){b.classList.toggle('on',on)})}
+function stopSpeak(){if(TTS){try{TTS.cancel()}catch(e){}}curUtt=null;setSpeaking(false)}
+function speak(text){
+  if(!TTS||!text)return;
+  stopSpeak();
+  var u=new SpeechSynthesisUtterance(text),v=pickVoice();
+  if(v){u.voice=v;u.lang=v.lang}else u.lang='en-US';
+  u.rate=S.voice.rate;
+  u.onend=u.onerror=function(){if(curUtt===u){curUtt=null;setSpeaking(false)}};
+  curUtt=u;setSpeaking(true);
+  try{TTS.speak(u)}catch(e){setSpeaking(false)}
+}
+function sayBtn(act){return TTS?'<button class="say" data-act="'+act+'" aria-label="Read aloud">'+ICON.speaker+'</button>':''}
+function spokenCode(src){
+  return String(src).replace('___',' blank ')
+    .replace(/\/\/\s*/g,' comment, ')
+    .replace(/println!/g,'print line')
+    .replace(/vec!/g,'vec')
+    .replace(/&&/g,' and ')
+    .replace(/&mut\s/g,'borrow mutable ')
+    .replace(/&/g,'borrow ')
+    .replace(/::/g,' double colon ')
+    .replace(/->/g,' arrow ')
+    .replace(/=>/g,' fat arrow ')
+    .replace(/\.\.=/g,' up to and including ')
+    .replace(/\.\./g,' up to ')
+    .replace(/==/g,' equals equals ')
+    .replace(/!=/g,' not equals ')
+    .replace(/<=/g,' less than or equal to ')
+    .replace(/>=/g,' greater than or equal to ')
+    .replace(/([A-Za-z])\.([A-Za-z])/g,'$1 dot $2')
+    .replace(/(^|[\s(,])_(?=[\s,)=]|$)/g,'$1underscore ')
+    .replace(/_/g,' ')
+    .replace(/;/g,' semicolon. ')
+    .replace(/\{\}/g,' curly braces ')
+    .replace(/\{/g,' open curly. ')
+    .replace(/\}/g,' close curly. ')
+    .replace(/\(/g,' open bracket ')
+    .replace(/\)/g,' close bracket ')
+    .replace(/\[/g,' open square bracket ')
+    .replace(/\]/g,' close square bracket ')
+    .replace(/</g,' less than ')
+    .replace(/>/g,' greater than ')
+    .replace(/=/g,' equals ')
+    .replace(/\+/g,' plus ')
+    .replace(/\*+(?=[A-Za-z_])/g,' ')
+    .replace(/\*/g,' times ')
+    .replace(/\|/g,' pipe ')
+    .replace(/\s-\s/g,' minus ')
+    .replace(/:/g,' colon ')
+    .replace(/"/g,' ')
+    .replace(/\s+/g,' ').trim();
+}
+function say(s){return s.replace(/`([^`]+)`/g,function(_,c){return spokenCode(c)})}
+function isMono(q){return !!(q.m||(q.code&&q.code.indexOf('___')>-1))}
+function learnText(){var lv=L.lv.level;return lv.title+'. '+lv.learn.text.map(say).join(' ')+(lv.learn.code?' Example code. '+spokenCode(lv.learn.code):'')}
+function questionText(){
+  var q=L.lv.level.qs[L.q],t=say(q.q)+'.';
+  if(q.code)t+=' Code. '+spokenCode(q.code)+'.';
+  if(q.t==='choice'){L.view.perm.forEach(function(oi,p){t+=' Option '+(p+1)+'. '+(isMono(q)?spokenCode(q.opts[oi]):q.opts[oi])+'.'})}
+  else if(q.t==='order'){t+=' Pieces: '+L.view.bank.map(function(id){return spokenCode(q.tokens[id])}).join(', ')+'.'}
+  return t;
+}
+function voicePanel(){
+  var sum='<summary>'+ICON.speaker+'Read-aloud voice</summary>';
+  if(!TTS)return '<details class="voice">'+sum+'<div class="vbody"><p class="vnote">This browser can’t read text aloud. Try Chrome, Edge or Safari.</p></div></details>';
+  return '<details class="voice">'+sum+'<div class="vbody"><label>Voice<select id="voiceSel" aria-label="Voice">'+voiceOptions()+'</select></label>'
+    +'<label>Speed <span id="rateval">'+(+S.voice.rate).toFixed(1)+'x</span><input id="rate" type="range" min="0.6" max="1.4" step="0.1" value="'+S.voice.rate+'"></label>'
+    +'<label class="vrow"><input id="autoRead" type="checkbox"'+(S.voice.auto?' checked':'')+'><span>Read each question aloud automatically</span></label>'
+    +'<button class="btn ghost" data-act="voice-test">Test voice</button>'
+    +'<p class="vnote">Every lesson has a speaker button to hear it on demand. The voices on offer depend on your device.</p></div></details>';
+}
+
+/* ---------- views ---------- */
+function show(id){$('#home').hidden=id!=='home';$('#lesson').hidden=id!=='lesson';$('#shop').hidden=id!=='shop';$('#final').hidden=id!=='final';window.scrollTo(0,0)}
+
+function lvlRow(X,ci,all){
+  var lv=X.level,done=!!S.done[X.key],isCur=X.idx===ci,locked=!done&&!all&&X.idx>ci;
+  var cls=(X.recap?'boss ':'')+(done?'done':isCur?'cur':locked?'lock':'');
+  var icon=done?ICON.check:locked?ICON.lock:(X.recap?S_(X.unit.foe.s,X.unit.foe.p,'bs'):ICON.play);
+  var meta=lv.qs.length+' questions · '+(done?'practice again':'up to '+(30+5*lv.qs.length)+' XP');
+  return '<button class="lvl '+cls+'"'+(locked?' disabled':'')+' data-act="start" data-i="'+X.idx+'"><span class="node">'+icon+'</span><span class="txt"><b>'+(X.recap?'Boss: '+esc(X.unit.foe.name):esc(lv.title))+'</b><small>'+(X.recap?'Section recap · ':'')+meta+'</small></span>'+(isCur?'<span class="go">'+(X.recap?'Fight':'Start')+'</span>':'')+'</button>';
+}
+function renderHome(){
+  var ci=curIdx(),all=ci===-1,ri=rankInfo(S.xp),cur=all?null:LEVELS[ci];
+  var pct=ri.next?Math.min(100,Math.round((S.xp-ri.from)/(ri.next[0]-ri.from)*100)):100;
+  var h='<header class="top"><div class="logo">'+heroSVG('')+'<b>Rust Dungeon</b></div><div class="stats">'
+    +'<div class="chip" title="Day streak">'+S_('flame','flame')+'<span>'+streakNow()+'</span></div>'
+    +'<div class="chip" title="Experience points">'+S_('gem','gem')+'<span>'+S.xp+'</span></div>'
+    +'<button class="chip" data-act="shop" title="Open the shop" aria-label="'+S.coins+' coins. Open the shop">'+S_('coin','coin')+'<span>'+S.coins+'</span></button></div></header>';
+  h+='<section class="quest"><div class="rank">'+esc(ri.name)+'</div>';
+  if(all){
+    h+=(S.final.claimed?'<h1>You slayed the dragon</h1><p>You finished the course and ran your own boss fight. Keep building.</p>':'<h1>The Ember Dragon awaits</h1><p>You cleared every section. Build your own boss fight and run it in the Rust Playground.</p><button class="btn" data-act="final">'+(finalStarted()?'Continue the final quest':'Start the final quest')+'</button>')
+      +'<div class="links"><a href="https://rustup.rs" target="_blank" rel="noopener">Install Rust</a><a href="https://macroquad.rs" target="_blank" rel="noopener">macroquad</a><a href="https://doc.rust-lang.org/book/" target="_blank" rel="noopener">The Rust Book</a></div>';
+  }else{
+    h+='<h1>'+(ci===0?'Start your first fight':cur.recap?'Boss fight: '+esc(cur.unit.foe.name):'Next up: '+esc(cur.level.title))+'</h1><p>'+(cur.recap?'Section recap · '+esc(SECTIONS[cur.sec].title):'Unit '+cur.unit.no+' · '+esc(cur.unit.title))+'</p>'
+      +'<button class="btn" data-act="start" data-i="'+ci+'">'+(ci===0?'Begin':'Continue')+'</button>';
+  }
+  h+='<div><div class="xpbar"><i style="width:'+pct+'%"></i></div><div class="xpnote"><span>'+S.xp+' XP</span><span>'+(ri.next?(ri.next[0]-S.xp)+' XP to '+esc(ri.next[1]):'Top rank')+'</span></div></div></section>';
+  h+='<section class="herocard">'+heroSVG('')+'<div><b>Your hero</b><span>'+S.coins+' coins to spend</span><div class="hbtns"><button class="btn small" data-act="shop">Open shop</button><button class="btn ghost small" data-act="redeem">Redeem code</button></div></div></section>';
+  h+=voicePanel();
+  h+='<div class="path">';
+  SECTIONS.forEach(function(sec,si){
+    var lvls=LEVELS.filter(function(x){return x.sec===si}),nd=lvls.filter(function(x){return S.done[x.key]}).length;
+    h+='<section class="sec"><div class="sechead"><p class="eb">Section '+(si+1)+'</p><h2>'+esc(sec.title)+'</h2><p>'+esc(sec.sub)+'</p><div class="secbar"><div class="xpbar"><i style="width:'+Math.round(nd/lvls.length*100)+'%"></i></div><span>'+nd+' / '+lvls.length+'</span></div></div>';
+    sec.uobjs.forEach(function(u){
+      var cleared=u.levels.every(function(_,li){return S.done[u.id+'-'+li]});
+      h+='<div class="unit" style="--u:'+u.color+'"><div class="uhead"><div><p class="eb">Unit '+u.no+'</p><h2>'+esc(u.title)+'</h2><p>'+esc(u.sub)+'</p>'+(cleared?'<span class="cleared">Cleared</span>':'')+'</div>'+S_(u.foe.s,u.foe.p)+'</div>';
+      u.levels.forEach(function(lv,li){h+=lvlRow(LEVELS.filter(function(x){return x.key===u.id+'-'+li})[0],ci,all)});
+      h+='</div>';
+    });
+    h+='<div class="unit">'+lvlRow(sec.rlevel,ci,all)+'</div></section>';
+  });
+  var fd=Object.keys(S.final.done).length,ft=finalSteps().length;
+  h+='<section class="sec"><div class="sechead"><p class="eb">Final quest</p><h2>The Ember Dragon</h2><p>Write a boss fight in Rust and run it in the Rust Playground.</p><div class="secbar"><div class="xpbar"><i style="width:'+Math.round(fd/ft*100)+'%"></i></div><span>'+fd+' / '+ft+'</span></div></div><div class="unit"><button class="lvl boss '+(S.final.claimed?'done':all?'cur':'lock')+'"'+(all?'':' disabled')+' data-act="final"><span class="node">'+(S.final.claimed?ICON.check:all?S_('dragon','dragon','bs'):ICON.lock)+'</span><span class="txt"><b>Boss: Ember Dragon</b><small>'+(all?ft+' guided steps · +100 coins':'Clear every section to unlock')+'</small></span>'+(all&&!S.final.claimed?'<span class="go">'+(fd?'Resume':'Start')+'</span>':'')+'</button></div></section>';
+  h+='</div><footer class="foot"><p>Want to run real code? Paste any snippet into the <a href="https://play.rust-lang.org" target="_blank" rel="noopener">Rust Playground</a> (wrap loose lines in <code class="ic">fn main() { }</code>). Your progress is saved in this browser.</p><div class="resets'+'">'+(all?'':'<button class="reset" data-act="final">Preview the final quest</button>')+'<button class="reset" data-act="reset" data-label="Reset progress">Reset progress</button><button class="reset" data-act="reset-all" data-label="Reset everything">Reset everything</button></div></footer>';
+  $('#home').innerHTML=h;
+}
+
+/* ---------- final quest ---------- */
+var FINAL_STEPS=[{"kind": "intro", "dot": "Welcome"}, {"kind": "step", "n": 1, "dot": "Step 1", "title": "Meet the fighters", "text": ["Every fight needs fighters. A `struct` bundles a name, health and attack power into one type, just like the hero blueprint from Unit 6.", "`main` builds two of them, Mira the hero and the Ember Dragon, then prints their stats."], "code": "struct Fighter {\n    name: String,\n    hp: i32,\n    attack: i32,\n}\n\nfn main() {\n    let hero = Fighter {\n        name: String::from(\"Mira\"),\n        hp: 50,\n        attack: 8,\n    };\n    let dragon = Fighter {\n        name: String::from(\"Ember Dragon\"),\n        hp: 70,\n        attack: 9,\n    };\n\n    println!(\"{} has {} HP and hits for {}.\", hero.name, hero.hp, hero.attack);\n    println!(\"{} has {} HP and hits for {}.\", dragon.name, dragon.hp, dragon.attack);\n}", "added": [], "ask": {"q": "What attack power will the dragon's line print?", "opts": ["6", "9", "70", "8"], "a": 1, "why": "The dragon is created with `attack: 9`."}, "out": "Mira has 50 HP and hits for 8.\nEmber Dragon has 70 HP and hits for 9."}, {"kind": "step", "n": 2, "dot": "Step 2", "title": "Teach them to fight", "text": ["Now give `Fighter` two methods in an `impl` block. `take_hit` lowers HP and never lets it drop below zero. `is_alive` tells you whether HP is above zero.", "`take_hit` changes the fighter, so it takes `&mut self`, and the dragon is declared with `let mut`."], "code": "struct Fighter {\n    name: String,\n    hp: i32,\n    attack: i32,\n}\n\nimpl Fighter {\n    fn take_hit(&mut self, dmg: i32) {\n        self.hp = self.hp - dmg;\n        if self.hp < 0 {\n            self.hp = 0;\n        }\n    }\n\n    fn is_alive(&self) -> bool {\n        self.hp > 0\n    }\n}\n\nfn main() {\n    let hero = Fighter {\n        name: String::from(\"Mira\"),\n        hp: 50,\n        attack: 8,\n    };\n    let mut dragon = Fighter {\n        name: String::from(\"Ember Dragon\"),\n        hp: 70,\n        attack: 9,\n    };\n\n    println!(\"{} has {} HP and hits for {}.\", hero.name, hero.hp, hero.attack);\n    println!(\"{} has {} HP and hits for {}.\", dragon.name, dragon.hp, dragon.attack);\n\n    dragon.take_hit(hero.attack);\n    println!(\"{} strikes! {} has {} HP left.\", hero.name, dragon.name, dragon.hp);\n    println!(\"Is the dragon still alive? {}\", dragon.is_alive());\n}", "added": [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 26, 34, 35, 36, 37], "ask": {"q": "How much HP will the dragon have left after Mira strikes once?", "opts": ["78", "70", "62", "8"], "a": 2, "why": "70 minus Mira's attack of 8 is 62."}, "out": "Mira has 50 HP and hits for 8.\nEmber Dragon has 70 HP and hits for 9.\nMira strikes! Ember Dragon has 62 HP left.\nIs the dragon still alive? true"}, {"kind": "step", "n": 3, "dot": "Step 3", "title": "Fight until someone falls", "text": ["A `while` loop keeps the fight going for as long as both fighters are alive. `&&` means both sides must be true.", "Each round Mira hits first. If the dragon survives, it hits back. `round` counts how many rounds have passed."], "code": "struct Fighter {\n    name: String,\n    hp: i32,\n    attack: i32,\n}\n\nimpl Fighter {\n    fn take_hit(&mut self, dmg: i32) {\n        self.hp = self.hp - dmg;\n        if self.hp < 0 {\n            self.hp = 0;\n        }\n    }\n\n    fn is_alive(&self) -> bool {\n        self.hp > 0\n    }\n}\n\nfn main() {\n    let mut hero = Fighter {\n        name: String::from(\"Mira\"),\n        hp: 50,\n        attack: 8,\n    };\n    let mut dragon = Fighter {\n        name: String::from(\"Ember Dragon\"),\n        hp: 70,\n        attack: 9,\n    };\n\n    let mut round = 1;\n    while hero.is_alive() && dragon.is_alive() {\n        println!(\"--- Round {} ---\", round);\n\n        dragon.take_hit(hero.attack);\n        println!(\"{} hits {}. Dragon HP: {}\", hero.name, dragon.name, dragon.hp);\n\n        if dragon.is_alive() {\n            hero.take_hit(dragon.attack);\n            println!(\"{} hits back. Mira HP: {}\", dragon.name, hero.hp);\n        }\n\n        round = round + 1;\n    }\n\n    if hero.is_alive() {\n        println!(\"{} wins!\", hero.name);\n    } else {\n        println!(\"{} wins...\", dragon.name);\n    }\n}", "added": [21, 32, 33, 34, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51], "ask": {"q": "Who wins this fight?", "opts": ["Mira", "Nobody, it never ends", "Ember Dragon"], "a": 2, "why": "Mira needs 9 hits to take down 70 HP, but the dragon needs only 6 hits to take down her 50 HP."}, "out": "--- Round 1 ---\nMira hits Ember Dragon. Dragon HP: 62\nEmber Dragon hits back. Mira HP: 41\n--- Round 2 ---\nMira hits Ember Dragon. Dragon HP: 54\nEmber Dragon hits back. Mira HP: 32\n--- Round 3 ---\nMira hits Ember Dragon. Dragon HP: 46\nEmber Dragon hits back. Mira HP: 23\n--- Round 4 ---\nMira hits Ember Dragon. Dragon HP: 38\nEmber Dragon hits back. Mira HP: 14\n--- Round 5 ---\nMira hits Ember Dragon. Dragon HP: 30\nEmber Dragon hits back. Mira HP: 5\n--- Round 6 ---\nMira hits Ember Dragon. Dragon HP: 22\nEmber Dragon hits back. Mira HP: 0\nEmber Dragon wins..."}, {"kind": "step", "n": 4, "dot": "Step 4", "title": "Plan your moves", "text": ["Mira needs options. An `enum` named `Action` lists what she can do each round: `Attack` or `Heal`. A `plan` array holds one action per round.", "`for action in plan` walks through the plan and `match action` runs the right code for each one. `break` stops early if someone has fallen. `heal` adds HP but never goes past `max_hp`."], "code": "struct Fighter {\n    name: String,\n    hp: i32,\n    max_hp: i32,\n    attack: i32,\n}\n\nimpl Fighter {\n    fn take_hit(&mut self, dmg: i32) {\n        self.hp = self.hp - dmg;\n        if self.hp < 0 {\n            self.hp = 0;\n        }\n    }\n\n    fn heal(&mut self, amount: i32) {\n        self.hp = self.hp + amount;\n        if self.hp > self.max_hp {\n            self.hp = self.max_hp;\n        }\n    }\n\n    fn is_alive(&self) -> bool {\n        self.hp > 0\n    }\n}\n\nenum Action {\n    Attack,\n    Heal,\n}\n\nfn main() {\n    let mut hero = Fighter {\n        name: String::from(\"Mira\"),\n        hp: 50,\n        max_hp: 50,\n        attack: 8,\n    };\n    let mut dragon = Fighter {\n        name: String::from(\"Ember Dragon\"),\n        hp: 70,\n        max_hp: 70,\n        attack: 9,\n    };\n\n    // Mira's plan: one action per round.\n    let plan = [\n        Action::Attack,\n        Action::Attack,\n        Action::Attack,\n        Action::Heal,\n        Action::Attack,\n        Action::Heal,\n        Action::Heal,\n        Action::Attack,\n        Action::Attack,\n        Action::Attack,\n        Action::Attack,\n        Action::Attack,\n    ];\n\n    let mut round = 1;\n    for action in plan {\n        if !hero.is_alive() || !dragon.is_alive() {\n            break;\n        }\n        println!(\"--- Round {} ---\", round);\n\n        match action {\n            Action::Attack => {\n                dragon.take_hit(hero.attack);\n                println!(\"{} attacks. Dragon HP: {}\", hero.name, dragon.hp);\n            }\n            Action::Heal => {\n                hero.heal(20);\n                println!(\"{} drinks a potion. Mira HP: {}\", hero.name, hero.hp);\n            }\n        }\n\n        if dragon.is_alive() {\n            hero.take_hit(dragon.attack);\n            println!(\"{} hits back. Mira HP: {}\", dragon.name, hero.hp);\n        }\n\n        round = round + 1;\n    }\n\n    if hero.is_alive() && !dragon.is_alive() {\n        println!(\"{} wins!\", hero.name);\n    } else if !hero.is_alive() {\n        println!(\"{} wins...\", dragon.name);\n    } else {\n        println!(\"The fight is still going.\");\n    }\n}", "added": [4, 16, 17, 18, 19, 20, 21, 22, 26, 27, 28, 29, 30, 37, 43, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 64, 65, 66, 67, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 89, 91, 92, 94], "ask": {"q": "How many rounds does the fight last?", "opts": ["9", "6", "12", "5"], "a": 2, "why": "The plan has 12 actions, and the dragon falls on the last one."}, "out": "--- Round 1 ---\nMira attacks. Dragon HP: 62\nEmber Dragon hits back. Mira HP: 41\n--- Round 2 ---\nMira attacks. Dragon HP: 54\nEmber Dragon hits back. Mira HP: 32\n--- Round 3 ---\nMira attacks. Dragon HP: 46\nEmber Dragon hits back. Mira HP: 23\n--- Round 4 ---\nMira drinks a potion. Mira HP: 43\nEmber Dragon hits back. Mira HP: 34\n--- Round 5 ---\nMira attacks. Dragon HP: 38\nEmber Dragon hits back. Mira HP: 25\n--- Round 6 ---\nMira drinks a potion. Mira HP: 45\nEmber Dragon hits back. Mira HP: 36\n--- Round 7 ---\nMira drinks a potion. Mira HP: 50\nEmber Dragon hits back. Mira HP: 41\n--- Round 8 ---\nMira attacks. Dragon HP: 30\nEmber Dragon hits back. Mira HP: 32\n--- Round 9 ---\nMira attacks. Dragon HP: 22\nEmber Dragon hits back. Mira HP: 23\n--- Round 10 ---\nMira attacks. Dragon HP: 14\nEmber Dragon hits back. Mira HP: 14\n--- Round 11 ---\nMira attacks. Dragon HP: 6\nEmber Dragon hits back. Mira HP: 5\n--- Round 12 ---\nMira attacks. Dragon HP: 0\nMira wins!"}, {"kind": "step", "n": 5, "dot": "Step 5", "title": "Crits and a boss rage", "text": ["Time for a twist. `%` gives the remainder after dividing, so `round % 3 == 0` is true on rounds 3, 6, 9 and so on. On those rounds an attack is a critical hit worth double damage.", "When the dragon drops to half HP it enrages and hits harder. The `enraged` variable remembers that it already happened, so it only triggers once."], "code": "struct Fighter {\n    name: String,\n    hp: i32,\n    max_hp: i32,\n    attack: i32,\n}\n\nimpl Fighter {\n    fn take_hit(&mut self, dmg: i32) {\n        self.hp = self.hp - dmg;\n        if self.hp < 0 {\n            self.hp = 0;\n        }\n    }\n\n    fn heal(&mut self, amount: i32) {\n        self.hp = self.hp + amount;\n        if self.hp > self.max_hp {\n            self.hp = self.max_hp;\n        }\n    }\n\n    fn is_alive(&self) -> bool {\n        self.hp > 0\n    }\n}\n\nenum Action {\n    Attack,\n    Heal,\n}\n\nfn main() {\n    let mut hero = Fighter {\n        name: String::from(\"Mira\"),\n        hp: 50,\n        max_hp: 50,\n        attack: 8,\n    };\n    let mut dragon = Fighter {\n        name: String::from(\"Ember Dragon\"),\n        hp: 70,\n        max_hp: 70,\n        attack: 9,\n    };\n\n    let plan = [\n        Action::Attack,\n        Action::Heal,\n        Action::Attack,\n        Action::Attack,\n        Action::Heal,\n        Action::Attack,\n        Action::Attack,\n        Action::Heal,\n        Action::Attack,\n    ];\n\n    let mut enraged = false;\n    let mut round = 1;\n    for action in plan {\n        if !hero.is_alive() || !dragon.is_alive() {\n            break;\n        }\n        println!(\"--- Round {} ---\", round);\n\n        match action {\n            Action::Attack => {\n                let mut dmg = hero.attack;\n                if round % 3 == 0 {\n                    dmg = dmg * 2;\n                    println!(\"CRITICAL HIT!\");\n                }\n                dragon.take_hit(dmg);\n                println!(\"{} attacks for {}. Dragon HP: {}\", hero.name, dmg, dragon.hp);\n            }\n            Action::Heal => {\n                hero.heal(20);\n                println!(\"{} drinks a potion. Mira HP: {}\", hero.name, hero.hp);\n            }\n        }\n\n        if dragon.is_alive() && !enraged && dragon.hp <= dragon.max_hp / 2 {\n            enraged = true;\n            dragon.attack = dragon.attack + 5;\n            println!(\"The {} ENRAGES! It now hits for {}.\", dragon.name, dragon.attack);\n        }\n\n        if dragon.is_alive() {\n            hero.take_hit(dragon.attack);\n            println!(\"{} hits back. Mira HP: {}\", dragon.name, hero.hp);\n        }\n\n        round = round + 1;\n    }\n\n    if hero.is_alive() && !dragon.is_alive() {\n        println!(\"Victory! {} slays the {} with {} HP to spare.\", hero.name, dragon.name, hero.hp);\n    } else if !hero.is_alive() {\n        println!(\"{} wins...\", dragon.name);\n    } else {\n        println!(\"The fight is still going.\");\n    }\n}", "added": [49, 54, 59, 69, 70, 71, 72, 73, 74, 75, 81, 82, 83, 84, 85, 86, 98], "ask": {"q": "On which rounds will CRITICAL HIT appear?", "opts": ["2, 4 and 6", "1, 4 and 7", "Every round", "3, 6 and 9"], "a": 3, "why": "Rounds 3, 6 and 9 divide evenly by 3, and Mira attacks in all three of them."}, "out": "--- Round 1 ---\nMira attacks for 8. Dragon HP: 62\nEmber Dragon hits back. Mira HP: 41\n--- Round 2 ---\nMira drinks a potion. Mira HP: 50\nEmber Dragon hits back. Mira HP: 41\n--- Round 3 ---\nCRITICAL HIT!\nMira attacks for 16. Dragon HP: 46\nEmber Dragon hits back. Mira HP: 32\n--- Round 4 ---\nMira attacks for 8. Dragon HP: 38\nEmber Dragon hits back. Mira HP: 23\n--- Round 5 ---\nMira drinks a potion. Mira HP: 43\nEmber Dragon hits back. Mira HP: 34\n--- Round 6 ---\nCRITICAL HIT!\nMira attacks for 16. Dragon HP: 22\nThe Ember Dragon ENRAGES! It now hits for 14.\nEmber Dragon hits back. Mira HP: 20\n--- Round 7 ---\nMira attacks for 8. Dragon HP: 14\nEmber Dragon hits back. Mira HP: 6\n--- Round 8 ---\nMira drinks a potion. Mira HP: 26\nEmber Dragon hits back. Mira HP: 12\n--- Round 9 ---\nCRITICAL HIT!\nMira attacks for 16. Dragon HP: 0\nVictory! Mira slays the Ember Dragon with 12 HP to spare."}, {"kind": "outro", "dot": "Reward"}];
+var F_INTRO=['You have learned the building blocks of Rust. Now you will use them to write a small boss fight, one piece at a time, and run it for real.','The Rust Playground is a free website that compiles and runs Rust in your browser. You do not need to install anything.'];
+var F_HOW=['Read what is new in the code. Green lines were added in this step.','Answer the prediction question before you run anything.','Open the code in the Playground and press Run.','Compare your output with ours. If it matches, move on.'];
+var F_IDEAS=['Change the numbers. Make the dragon stronger and see if Mira can still win.','Add an `Action::Block` that halves the next hit.','Add a second boss and fight both in a row.','Print a health bar such as [#####-----] using a loop.'];
+var FPAGE=0,FPICK={};
+function playgroundURL(code){return 'https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&code='+encodeURIComponent(code)}
+function codeHTML(src,added){
+  var set={};(added||[]).forEach(function(n){set[n]=1});
+  return hl(src).split('\n').map(function(l,i){return '<span class="ln'+(set[i+1]?' add':'')+'">'+l+'<\/span>'}).join('');
+}
+function finalStarted(){return Object.keys(S.final.done).length>0}
+function finalSteps(){return FINAL_STEPS.filter(function(p){return p.kind==='step'})}
+function finalSpeech(){
+  var P=FINAL_STEPS[FPAGE];
+  if(P.kind==='step')return 'Step '+P.n+'. '+P.title+'. '+P.text.map(say).join(' ');
+  if(P.kind==='intro')return 'Slay the Ember Dragon. '+F_INTRO.map(say).join(' ')+' '+F_HOW.map(say).join(' ');
+  return 'Dragon slain. Here are some ideas to make it yours. '+F_IDEAS.map(say).join(' ');
+}
+function setFmsg(t){var m=$('#fmsg');if(m)m.textContent=t}
+function copyCode(){
+  var P=FINAL_STEPS[FPAGE];
+  var fail=function(){var pre=$('#fcode');if(pre){var r=document.createRange();r.selectNodeContents(pre);var s=window.getSelection();s.removeAllRanges();s.addRange(r)}setFmsg('The code is selected. Copy it with your keyboard, or press and hold on a phone.')};
+  try{navigator.clipboard.writeText(P.code).then(function(){setFmsg('Copied. Paste it into the Playground and press Run.')},fail)}catch(e){fail()}
+}
+function claimFinal(){
+  var n=finalSteps().filter(function(p){return S.final.done[p.n]}).length;
+  if(S.final.claimed||n<finalSteps().length)return;
+  S.final.claimed=1;S.coins+=100;S.xp+=100;save();
+  renderFinal('Reward claimed: +100 coins and +100 XP.','.dock [data-act="home"]');
+}
+function renderFinal(msg,focusSel){
+  var P=FINAL_STEPS[FPAGE],total=finalSteps().length,h='';
+  h+='<header class="top"><button class="xbtn" data-act="home" aria-label="Back to the map">'+ICON.back+'<\/button><b class="shoptitle">Final Quest<\/b><div class="stats"><div class="chip" title="Coins">'+S_('coin','coin')+'<span>'+S.coins+'<\/span><\/div><\/div><\/header>';
+  h+='<nav class="fdots" aria-label="Final quest pages">'+FINAL_STEPS.map(function(p,i){
+    var d=p.kind==='step'&&S.final.done[p.n]||p.kind==='outro'&&S.final.claimed;
+    var inner=d?ICON.check:p.kind==='step'?p.n:p.kind==='intro'?ICON.play:S_('coin','coin');
+    return '<button class="fdot'+(i===FPAGE?' cur':'')+(d?' done':'')+'" data-act="fgo" data-i="'+i+'" aria-label="'+esc(p.dot)+'"'+(i===FPAGE?' aria-current="step"':'')+'>'+inner+'<\/button>';
+  }).join('')+'<\/nav>';
+  h+='<div class="fq">';
+  if(P.kind==='intro'){
+    h+='<div class="fcast">'+heroSVG('')+S_('dragon','dragon')+'<\/div><div class="qhead" style="margin-top:14px"><p class="qtype">Final quest<\/p>'+sayBtn('say-final')+'<\/div><h1>Slay the Ember Dragon<\/h1>';
+    F_INTRO.forEach(function(t){h+='<p>'+md(t)+'<\/p>'});
+    h+='<p class="lab">How each step works<\/p><ol>'+F_HOW.map(function(t){return '<li>'+md(t)+'<\/li>'}).join('')+'<\/ol>';
+    h+='<div class="btnrow"><a class="btn ghost small" href="https://play.rust-lang.org" target="_blank" rel="noopener">Open the Playground<\/a><\/div>';
+    h+='<\/div><div class="dock"><button class="btn" data-act="fnext">Start step 1<\/button><\/div>';
+  }else if(P.kind==='step'){
+    h+='<div class="qhead"><p class="qtype">Step '+P.n+' of '+total+'<\/p>'+sayBtn('say-final')+'<\/div><h1>'+esc(P.title)+'<\/h1>';
+    P.text.forEach(function(t){h+='<p>'+md(t)+'<\/p>'});
+    h+='<p class="lab">Your program so far'+(P.added.length?' · green lines are new':'')+'<\/p><pre class="code" id="fcode">'+codeHTML(P.code,P.added)+'<\/pre>';
+    h+='<div class="btnrow"><button class="btn ghost small" data-act="fcopy">Copy code<\/button><a class="btn small" href="'+playgroundURL(P.code)+'" target="_blank" rel="noopener">Open in Playground<\/a><\/div>';
+    h+='<p class="fmsg" id="fmsg" role="status" aria-live="polite">'+esc(msg||'')+'<\/p>';
+    var pk=FPICK[P.n],solved=pk===P.ask.a;
+    h+='<section class="predict"><p class="qtype">Before you run it<\/p><h2 class="prompt">'+md(P.ask.q)+'<\/h2>'+P.ask.opts.map(function(o,i){
+      var cls=pk===i?(i===P.ask.a?' good':' bad'):'';
+      return '<button class="opt'+cls+'" data-act="fpick" data-i="'+i+'"'+(solved&&pk!==i?' disabled':'')+'><span class="kc">'+(i+1)+'<\/span><span class="t">'+esc(o)+'<\/span><\/button>';
+    }).join('');
+    h+='<p class="pfb" role="status" aria-live="polite">'+(pk===undefined?'':solved?'<strong>Correct.<\/strong> '+md(P.ask.why):'Not quite. Try another one.')+'<\/p><\/section>';
+    h+='<details class="voice"><summary>Show what you should see<\/summary><div class="vbody"><pre class="code out">'+esc(P.out)+'<\/pre><\/div><\/details>';
+    h+='<details class="voice"><summary>Output looks different?<\/summary><div class="vbody"><ul class="tips"><li>Copy the whole program, not just the green lines. Each step replaces the one before.<\/li><li>Every opening <code class="ic">{<\/code> needs a closing <code class="ic">}<\/code>.<\/li><li>Read the first red error. It names the line to look at.<\/li><li>Yellow warnings are fine. Only red errors stop the run.<\/li><\/ul><\/div><\/details>';
+    h+='<\/div><div class="dock"><button class="btn" data-act="fnext">'+(P.n===total?'It matched! Finish':'It matched! Next step')+'<\/button><button class="btn ghost" data-act="fback">Back<\/button><\/div>';
+  }else{
+    var all=finalSteps().every(function(p){return S.final.done[p.n]});
+    var last=finalSteps()[total-1];
+    h+='<div class="fcast">'+heroSVG('')+'<\/div><div class="qhead" style="margin-top:14px"><p class="qtype">Quest complete<\/p>'+sayBtn('say-final')+'<\/div><h1>You built a boss fight<\/h1>';
+    h+='<p>That program uses structs, methods, enums, loops, match and plenty more of what you learned. Every line of it is yours to change.<\/p>';
+    h+='<p class="lab">Make it yours<\/p><ul>'+F_IDEAS.map(function(t){return '<li>'+md(t)+'<\/li>'}).join('')+'<\/ul>';
+    h+='<p class="lab">Keep going<\/p><p>Install Rust from <a href="https://rustup.rs" target="_blank" rel="noopener">rustup.rs<\/a>, run <code class="ic">cargo new boss_fight<\/code>, paste the code into <code class="ic">src/main.rs<\/code> and start it with <code class="ic">cargo run<\/code>. When you want graphics, try <a href="https://macroquad.rs" target="_blank" rel="noopener">macroquad<\/a>.<\/p>';
+    h+=S.final.claimed?'<div class="codebox"><span>Secret code found</span><b>DRAGONHOARD</b><small>'+(S.codes.DRAGONHOARD?'You already redeemed this one.':'Redeem it in the shop for 500 coins.')+'</small></div>'+(S.codes.DRAGONHOARD?'':'<div class="btnrow"><button class="btn small" data-act="redeem" data-code="DRAGONHOARD">Redeem the code</button></div>'):'';
+    h+='<div class="btnrow"><a class="btn ghost small" href="'+playgroundURL(last.code)+'" target="_blank" rel="noopener">Open the finished fight<\/a><\/div>';
+    h+='<p class="fmsg" id="fmsg" role="status" aria-live="polite">'+esc(msg||'')+'<\/p>';
+    h+='<\/div><div class="dock">'+(S.final.claimed?'<button class="btn good" disabled>Reward claimed<\/button>':'<button class="btn" data-act="fclaim"'+(all?'':' disabled')+'>'+(all?'Claim 100 coins and 100 XP':'Finish all '+total+' steps to claim')+'<\/button>')+'<button class="btn ghost" data-act="home">Back to the map<\/button><\/div>';
+  }
+  $('#final').innerHTML=h;
+  if(focusSel){var n=document.querySelector(focusSel);if(n&&!n.disabled)n.focus({preventScroll:true})}
+}
+
+/* ---------- shop ---------- */
+var SHOP_TAB='hat',SHOP_PREFILL='';
+function itemCard(it){
+  var owned=!!S.owned[it.id],eq=S.eq[it.slot]===it.id,need=it.price-S.coins,over={};
+  over[it.slot]=it.id;
+  var btn=eq?(it.slot==='armor'?'<button class="btn ghost" disabled>Wearing</button>':'<button class="btn ghost" data-act="unequip" data-id="'+it.id+'">Take off</button>')
+    :owned?'<button class="btn good" data-act="equip" data-id="'+it.id+'">Equip</button>'
+    :'<button class="btn" data-act="buy" data-id="'+it.id+'"'+(need>0?' disabled':'')+'>'+(need>0?'Need '+need+' more':'Buy')+'</button>';
+  var price=owned?'<span class="price">'+(it.secret?'Exclusive':(eq?'Equipped':'Owned'))+'</span>':'<span class="price">'+S_('coin','coin')+it.price+'</span>';
+  return '<article class="item'+(eq?' eq':'')+'" data-item="'+it.id+'">'+heroSVG('',over)+'<b>'+esc(it.name)+'</b>'+price+btn+'</article>';
+}
+function renderShop(msg,focusSel){
+  var h='<header class="top"><button class="xbtn" data-act="shop-back" aria-label="Back to the map">'+ICON.back+'</button><b class="shoptitle">Hero Shop</b><div class="stats"><div class="chip" title="Coins">'+S_('coin','coin')+'<span>'+S.coins+'</span></div></div></header>';
+  h+='<div class="stage">'+heroSVG('')+'<div class="floor"></div></div>';
+  h+='<form class="redeem" id="codeform" autocomplete="off"><label for="codein">Have a code?</label><div class="rrow"><input class="typein" id="codein" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="Enter code" value="'+esc(SHOP_PREFILL)+'"><button class="btn small" type="submit">Redeem</button></div><p class="vnote">'+Object.keys(S.codes).length+' of '+Object.keys(CODES).length+' codes found</p></form>';
+  SHOP_PREFILL='';
+  h+='<p class="shopmsg" role="status" aria-live="polite">'+esc(msg||'Earn coins by clearing levels. Replaying a level still pays a few.')+'</p>';
+  h+='<div class="tabs" role="tablist" aria-label="Cosmetic type">'+SLOTS.map(function(s){return '<button class="tab" role="tab" id="tab-'+s.id+'" aria-selected="'+(s.id===SHOP_TAB)+'" data-act="tab" data-id="'+s.id+'">'+s.label+'</button>'}).join('')+'</div>';
+  h+='<div class="items" role="tabpanel" aria-labelledby="tab-'+SHOP_TAB+'">'+ITEMS.filter(function(it){return it.slot===SHOP_TAB&&(!it.secret||S.owned[it.id])}).map(itemCard).join('')+'</div>';
+  $('#shop').innerHTML=h;
+  if(focusSel){var n=document.querySelector(focusSel);if(n)n.focus({preventScroll:true})}
+}
+function setShopMsg(t){var m=document.querySelector('#shop .shopmsg');if(m)m.textContent=t}
+function redeemCode(raw){
+  var key=String(raw||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!key)return {ok:false,msg:'Type a code first.'};
+  var c=CODES[key];
+  if(!c)return {ok:false,msg:'That code does not exist. Check the spelling.'};
+  if(S.codes[key])return {ok:false,msg:'You already used that code.'};
+  var msg='Code accepted. ';
+  S.codes[key]=1;
+  if(c.coins){S.coins+=c.coins;msg+='You got '+c.coins+' coins. '}
+  (c.items||[]).forEach(function(id){var it=ITEM_BY[id];if(!it)return;S.owned[id]=1;S.eq[it.slot]=id;SHOP_TAB=it.slot;msg+='The '+it.name+' is yours and equipped. '});
+  save();
+  return {ok:true,msg:msg.trim()};
+}
+function shopAction(act,id){
+  var it=ITEM_BY[id];if(!it)return;
+  var sel='.item[data-item="'+id+'"] .btn:not(:disabled)';
+  if(act==='buy'){
+    if(S.owned[id])return;
+    if(S.coins<it.price){renderShop('You need '+(it.price-S.coins)+' more coins for the '+it.name+'.',sel);return}
+    S.coins-=it.price;S.owned[id]=1;S.eq[it.slot]=id;save();
+    renderShop('Bought the '+it.name+'. It is on your hero now.',sel);
+  }else if(act==='equip'){
+    if(!S.owned[id])return;S.eq[it.slot]=id;save();renderShop('Equipped the '+it.name+'.',sel);
+  }else if(act==='unequip'){
+    if(it.slot==='armor')return;S.eq[it.slot]='';save();renderShop('Took off the '+it.name+'.',sel);
+  }
+}
+
+/* ---------- lesson ---------- */
+var L=null;
+function heartsHTML(){var h='';for(var i=0;i<L.max;i++)h+=S_('heart',i<L.hearts?'heart':'heartoff');return h}
+function startLevel(i){
+  var lv=LEVELS[i];
+  L={i:i,lv:lv,max:lv.recap?5:3,hearts:lv.recap?5:3,queue:lv.level.qs.map(function(_,k){return k}),done:new Set(),wrong:new Set(),first:0,total:lv.level.qs.length,q:0,view:{}};
+  show('lesson');renderLearn();
+}
+function topbar(){return '<div class="lbar"><button class="xbtn" data-act="quit" aria-label="Leave lesson">'+ICON.x+'</button><div class="hpbar" role="progressbar" aria-label="Enemy health" aria-valuemin="0" aria-valuemax="100"><i id="hp" style="width:100%"></i></div><div class="hearts" id="hearts" aria-label="Hearts left">'+heartsHTML()+'</div></div>'}
+function renderLearn(){
+  var u=L.lv.unit,lv=L.lv.level;
+  var h='<div class="lbar"><button class="xbtn" data-act="quit" aria-label="Leave lesson">'+ICON.x+'</button><span class="qtype" style="margin:0">'+(L.lv.recap?'Section recap':'Unit '+u.no+' · Level '+(L.lv.li+1))+'</span>'+sayBtn('say-learn')+'</div>';
+  h+='<div class="learn"><div class="hero-foe">'+S_(u.foe.s,u.foe.p)+'<div><p class="qtype" style="margin:0">Enemy ahead: '+esc(u.foe.name)+'</p></div></div><h1>'+esc(lv.title)+'</h1>';
+  lv.learn.text.forEach(function(t){h+='<p>'+md(t)+'</p>'});
+  h+=(lv.learn.code?'<pre class="code">'+hl(lv.learn.code)+'</pre>':'')+'</div>';
+  h+='<div class="dock"><button class="btn" data-act="fight">Fight the '+esc(u.foe.name)+'</button></div>';
+  setTimeout(function(){stopSpeak();if(S.voice.auto&&L)speak(learnText())},0);
+  $('#lesson').innerHTML=h;window.scrollTo(0,0);
+}
+function startFight(){
+  var u=L.lv.unit;
+  $('#lesson').innerHTML=topbar()+'<div class="arena" id="arena"><div class="fighter hero">'+heroSVG('')+'<small>You</small></div><div class="fighter foe">'+S_(u.foe.s,u.foe.p)+'<small>'+esc(u.foe.name)+'</small></div></div><div id="qbox"></div><div class="dock" id="dock"></div>';
+  L.q=L.queue.shift();renderQ();
+}
+function updateBar(){
+  $('#hp').style.width=(100-Math.round(L.done.size/L.total*100))+'%';
+  $('#hearts').innerHTML=heartsHTML();
+}
+function dock(h){$('#dock').innerHTML=h}
+function renderQ(){
+  var q=L.lv.level.qs[L.q];
+  L.view={sel:null,built:[],text:'',fb:false};
+  var label={choice:'Pick the answer',order:'Build the line',type:'Type it'}[q.t];
+  var h='<div class="qhead"><p class="qtype">'+label+'</p>'+sayBtn('say-q')+'</div><h2 class="prompt">'+md(q.q)+'</h2>';
+  if(q.code)h+='<pre class="code">'+hl(q.code)+'</pre>';
+  if(q.t==='choice'){
+    L.view.perm=shuffle(q.opts.map(function(_,i){return i}));
+    var mono=q.m||(q.code&&q.code.indexOf('___')>-1);
+    L.view.perm.forEach(function(oi,pos){h+='<button class="opt'+(mono?' mono':'')+'" data-act="pick" data-i="'+pos+'"><span class="kc">'+(pos+1)+'</span><span class="t">'+esc(q.opts[oi])+'</span></button>'});
+  }else if(q.t==='order'){
+    var b;do{b=shuffle(q.tokens.map(function(_,i){return i}))}while(b.slice(0,q.ans.length).every(function(id,k){return q.tokens[id]===q.ans[k]}));
+    L.view.bank=b;h+='<div class="line" id="line"></div><div class="bank" id="bank"></div>';
+  }else{
+    h+='<input class="typein" id="typein" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Your answer" placeholder="Type here">';
+  }
+  $('#qbox').innerHTML=h;
+  dock('<button class="btn" id="check" data-act="check" disabled>Check</button>');
+  if(q.t==='order')renderOrder();
+  stopSpeak();if(S.voice.auto)speak(questionText());
+  if(q.t==='type'){var inp=$('#typein');inp.addEventListener('input',function(){L.view.text=inp.value;var bl=$('#blank');if(bl)bl.textContent=inp.value.trim();$('#check').disabled=!inp.value.trim()});if(window.matchMedia&&!matchMedia('(pointer:coarse)').matches)inp.focus()}
+}
+function renderOrder(){
+  var q=L.lv.level.qs[L.q],v=L.view;
+  $('#line').innerHTML=v.built.map(function(id,pos){return '<button class="tok" data-act="untok" data-i="'+pos+'">'+esc(q.tokens[id])+'</button>'}).join('');
+  $('#bank').innerHTML=v.bank.map(function(id){var used=v.built.indexOf(id)>-1;return '<button class="tok'+(used?' used':'')+'" data-act="tok" data-i="'+id+'"'+(used?' tabindex="-1" aria-hidden="true"':'')+'>'+esc(q.tokens[id])+'</button>'}).join('');
+  var c=$('#check');if(c)c.disabled=v.built.length===0;
+}
+var norm=function(s){return String(s).trim().replace(/\s+/g,' ')};
+function check(){
+  var q=L.lv.level.qs[L.q],v=L.view;if(v.fb)return;
+  var ok=false,ans='';
+  if(q.t==='choice'){if(v.sel===null)return;ok=v.perm[v.sel]===0;ans=q.opts[0]}
+  else if(q.t==='order'){if(!v.built.length)return;ok=v.built.map(function(id){return q.tokens[id]}).join('\u0001')===q.ans.join('\u0001');ans=q.ans.join(q.join)}
+  else{if(!norm(v.text))return;ok=q.accept.some(function(a){return norm(a)===norm(v.text)});ans=q.accept[0]}
+  v.fb=true;
+  if(q.t==='choice'){document.querySelectorAll('.opt').forEach(function(b,pos){b.disabled=true;if(v.perm[pos]===0)b.classList.add('good');else if(pos===v.sel&&!ok)b.classList.add('bad')})}
+  if(q.t==='order'){document.querySelectorAll('.tok').forEach(function(b){b.disabled=true})}
+  if(q.t==='type'){var ti=$('#typein');ti.readOnly=true;ti.classList.add(ok?'good':'bad')}
+  if(ok){L.done.add(L.q);if(!L.wrong.has(L.q))L.first++}
+  else{L.hearts--;L.wrong.add(L.q);L.queue.push(L.q)}
+  updateBar();hit(ok?'good':'bad');
+  L.fbText=(ok?'Correct. ':'Not quite. The answer is '+((q.t==='choice'&&!isMono(q))?ans:spokenCode(ans))+'. ')+say(q.why);
+  if(S.voice.auto)speak(L.fbText);
+  var last=L.hearts<=0;
+  dock('<div class="fb '+(ok?'good':'bad')+'"><div class="fbhead"><strong>'+(ok?['Direct hit!','Nice swing!','Critical!','Clean strike!'][Math.floor(Math.random()*4)]:'Ouch, not quite')+'</strong>'+sayBtn('say-fb')+'</div>'
+    +(ok?'':'<p class="ans">'+esc(ans)+'</p>')+'<p>'+md(q.why)+'</p></div>'
+    +'<button class="btn '+(ok?'good':'bad')+'" id="next" data-act="next">'+(last?'Continue':'Continue')+'</button>');
+  var n=$('#next');if(n)n.focus({preventScroll:true});
+}
+function hit(kind){var a=$('#arena');if(!a)return;a.classList.remove('good','bad');void a.offsetWidth;a.classList.add(kind)}
+function next(){
+  if(L.hearts<=0)return renderEnd(false);
+  if(!L.queue.length)return renderEnd(true);
+  L.q=L.queue.shift();renderQ();window.scrollTo(0,0);
+}
+function renderEnd(win){
+  stopSpeak();
+  var u=L.lv.unit,h='';
+  if(win){
+    var first=!S.done[L.lv.key],flawless=L.wrong.size===0;
+    var xp=first?20+5*L.first+(flawless?10:0):10;
+    var coins=first?10+2*L.first+(flawless?10:0)+(L.lv.recap?25:0):5+L.first;
+    S.xp+=xp;S.coins+=coins;S.done[L.lv.key]=1;touchStreak();save();
+    var acc=Math.round(L.first/L.total*100);
+    var rc=L.lv.recap?RECAP_CODES[SECTIONS[L.lv.sec].id]:'',rcBox=rc?'<div class="codebox"><span>Secret code found</span><b>'+rc+'</b><small>'+(S.codes[rc]?'You already redeemed this one.':'Redeem it in the shop for a reward.')+'</small></div>':'';
+    h='<div class="end"><p class="qtype">Victory</p>'+S_(u.foe.s,u.foe.p,'dead')+'<h1>'+esc(u.foe.name)+' defeated</h1><p>'+(first?'Level cleared.':'Nice practice round.')+'</p>'
+      +'<div class="sgrid"><div><b>+'+xp+'</b><span>XP</span></div><div><b>+'+coins+'</b><span>Coins</span></div><div><b>'+acc+'%</b><span>First try</span></div><div><b>'+L.hearts+'/'+L.max+'</b><span>Hearts</span></div></div>'+rcBox+'</div>'
+      +'<div class="dock"><button class="btn good" data-act="home">Continue</button>'+(rc&&!S.codes[rc]?'<button class="btn ghost" data-act="redeem" data-code="'+rc+'">Redeem the code</button>':'<button class="btn ghost" data-act="shop">Spend coins in the shop</button>')+'</div>';
+  }else{
+    h='<div class="end"><p class="qtype" style="color:var(--bad)">Knocked out</p>'+heroSVG('dead')+'<h1>The '+esc(u.foe.name)+' wins this round</h1><p>Read the lesson notes again and have another go. Mistakes are how this sticks.</p></div>'
+      +'<div class="dock"><button class="btn" data-act="retry">Try again</button><button class="btn ghost" data-act="home">Back to the map</button></div>';
+  }
+  $('#lesson').innerHTML=h;window.scrollTo(0,0);
+}
+function goHome(){stopSpeak();L=null;renderHome();show('home')}
+function quitModal(){
+  var m=document.createElement('div');m.className='modal';m.id='modal';
+  m.innerHTML='<div class="box" role="dialog" aria-modal="true" aria-labelledby="mt"><h2 id="mt">Leave this fight?</h2><p>You will lose your progress in this lesson.</p><button class="btn" data-act="stay">Keep fighting</button><button class="btn ghost" data-act="leave">Leave</button></div>';
+  document.body.appendChild(m);
+}
+function closeModal(){var m=$('#modal');if(m)m.remove()}
+
+/* ---------- events ---------- */
+var resetTimer=null;
+document.addEventListener('click',function(e){
+  var el=e.target.closest('[data-act]');if(!el||el.disabled)return;
+  var act=el.getAttribute('data-act'),i=el.getAttribute('data-i');
+  if(act==='start')startLevel(+i);
+  else if(act==='fight')startFight();
+  else if(act==='pick'){
+    if(L.view.fb)return;L.view.sel=+i;
+    document.querySelectorAll('.opt').forEach(function(b,p){b.classList.toggle('sel',p===+i)});
+    var bl=$('#blank');if(bl)bl.textContent=L.lv.level.qs[L.q].opts[L.view.perm[+i]];
+    $('#check').disabled=false;
+  }
+  else if(act==='tok'){if(L.view.fb)return;if(L.view.built.indexOf(+i)===-1){L.view.built.push(+i);renderOrder()}}
+  else if(act==='untok'){if(L.view.fb)return;L.view.built.splice(+i,1);renderOrder()}
+  else if(act==='say-learn'||act==='say-q'||act==='say-fb'||act==='voice-test'){
+    if(talking&&act!=='voice-test'){stopSpeak();return}
+    speak(act==='say-learn'?learnText():act==='say-q'?questionText():act==='say-fb'?L.fbText:'Hello hero. This is how I will read your lessons.');
+  }
+  else if(act==='check')check();
+  else if(act==='next')next();
+  else if(act==='retry')startLevel(L.i);
+  else if(act==='shop'){stopSpeak();renderShop();show('shop')}
+  else if(act==='redeem'){stopSpeak();SHOP_PREFILL=el.getAttribute('data-code')||'';renderShop(null,'#codein');show('shop')}
+  else if(act==='shop-back')goHome();
+  else if(act==='final'){stopSpeak();FPAGE=Math.min(Math.max(+S.final.at||0,0),FINAL_STEPS.length-1);renderFinal();show('final')}
+  else if(act==='fgo'){FPAGE=+i;S.final.at=FPAGE;save();renderFinal();window.scrollTo(0,0)}
+  else if(act==='fnext'){var FP=FINAL_STEPS[FPAGE];if(FP.kind==='step')S.final.done[FP.n]=1;FPAGE=Math.min(FPAGE+1,FINAL_STEPS.length-1);S.final.at=FPAGE;save();renderFinal();window.scrollTo(0,0)}
+  else if(act==='fback'){FPAGE=Math.max(FPAGE-1,0);S.final.at=FPAGE;save();renderFinal();window.scrollTo(0,0)}
+  else if(act==='fpick'){var FQ=FINAL_STEPS[FPAGE];if(FPICK[FQ.n]===FQ.ask.a)return;FPICK[FQ.n]=+i;renderFinal(null,'.predict .opt[data-i="'+i+'"]')}
+  else if(act==='fcopy')copyCode();
+  else if(act==='fclaim')claimFinal();
+  else if(act==='say-final'){if(talking){stopSpeak();return}speak(finalSpeech())}
+  else if(act==='tab'){SHOP_TAB=el.getAttribute('data-id');renderShop(null,'#tab-'+SHOP_TAB)}
+  else if(act==='buy'||act==='equip'||act==='unequip')shopAction(act,el.getAttribute('data-id'));
+  else if(act==='home')goHome();
+  else if(act==='quit')quitModal();
+  else if(act==='stay')closeModal();
+  else if(act==='leave'){closeModal();goHome()}
+  else if(act==='reset'||act==='reset-all'){
+    var disarm=function(){document.querySelectorAll('.reset').forEach(function(b){b.removeAttribute('data-armed');b.textContent=b.getAttribute('data-label')})};
+    if(el.getAttribute('data-armed')){
+      var keep=act==='reset'?S.voice:{uri:'',rate:1,auto:false};
+      stopSpeak();S=fresh(keep);save();renderHome();
+    }else{
+      disarm();el.setAttribute('data-armed','1');el.textContent='Tap again to confirm';
+      clearTimeout(resetTimer);resetTimer=setTimeout(disarm,4000);
+    }
+  }
+});
+document.addEventListener('keydown',function(e){
+  if(!L||$('#lesson').hidden)return;
+  var tag=(e.target.tagName||'').toLowerCase();
+  if(e.key==='Enter'&&tag!=='button'){
+    var n=$('#next');if(n){e.preventDefault();n.click();return}
+    var c=$('#check');if(c&&!c.disabled){e.preventDefault();c.click()}
+  }else if(/^[1-4]$/.test(e.key)&&tag!=='input'&&L.view&&!L.view.fb){
+    var b=document.querySelectorAll('.opt')[+e.key-1];if(b)b.click();
+  }
+});
+
+document.addEventListener('change',function(e){
+  var t=e.target;
+  if(t.id==='voiceSel'){S.voice.uri=t.value;save();speak('Hello hero.')}
+  else if(t.id==='autoRead'){S.voice.auto=t.checked;save()}
+});
+document.addEventListener('submit',function(e){
+  if(e.target.id!=='codeform')return;
+  e.preventDefault();
+  var r=redeemCode($('#codein').value);
+  if(r.ok)renderShop(r.msg,'#codein');else setShopMsg(r.msg);
+});
+document.addEventListener('input',function(e){
+  var t=e.target;
+  if(t.id==='rate'){S.voice.rate=+t.value;var rv=$('#rateval');if(rv)rv.textContent=S.voice.rate.toFixed(1)+'x';save()}
+});
+
+renderHome();
+})();
+</script>
+
+</body></html>
